@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm dev:server:*)",
+      "Bash(dir:*)",
+      "Bash(pnpm:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(npx kill-port:*)",
+      "Bash(powershell:*)",
+      "Bash(powershell.exe -NoProfile -File - <<'PSEOF'\n$conns = Get-NetTCPConnection -LocalPort 2567 -ErrorAction SilentlyContinue\nforeach \\($c in $conns\\) {\n  $pid = $c.OwningProcess\n  Write-Host \"Killing PID $pid\"\n  Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue\n}\nWrite-Host \"Done\"\nPSEOF)"
+    ]
+  }
+}

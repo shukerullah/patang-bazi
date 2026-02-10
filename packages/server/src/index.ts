@@ -3,11 +3,15 @@
 // Colyseus server with Express
 // ============================================
 
-import { Server } from 'colyseus';
-import { WebSocketTransport } from '@colyseus/ws-transport';
-import { monitor } from '@colyseus/monitor';
+import colyseus from 'colyseus';
+import wsTransport from '@colyseus/ws-transport';
+import colyseusMonitor from '@colyseus/monitor';
 import express from 'express';
 import http from 'http';
+
+const { Server } = colyseus;
+const { WebSocketTransport } = wsTransport;
+const { monitor } = colyseusMonitor;
 import { PatangRoom } from './rooms/PatangRoom.js';
 import { ROOM_NAME } from '@patang/shared';
 

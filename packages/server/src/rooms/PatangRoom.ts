@@ -4,7 +4,8 @@
 // Runs physics, handles inputs, broadcasts state
 // ============================================
 
-import { Room, Client } from 'colyseus';
+import colyseus from 'colyseus';
+const { Room, Client } = colyseus;
 import {
   GameRoomState,
   PlayerSchema,
