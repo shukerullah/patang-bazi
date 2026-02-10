@@ -20,12 +20,10 @@ const PORT = Number(process.env.PORT) || 2567;
 async function main() {
   const app = express();
 
-  // Health check
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() });
   });
 
-  // Colyseus monitor (dev only)
   if (process.env.NODE_ENV !== 'production') {
     app.use('/monitor', monitor());
   }
@@ -36,9 +34,8 @@ async function main() {
     transport: new WebSocketTransport({ server }),
   });
 
-  // Register game room
   gameServer.define(ROOM_NAME, PatangRoom)
-    .filterBy(['roomCode']);  // Allow private rooms by code
+    .filterBy(['roomCode']);
 
   gameServer.listen(PORT);
 

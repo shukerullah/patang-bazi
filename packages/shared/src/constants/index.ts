@@ -41,13 +41,14 @@ export const STAR_POINTS = 10;
 export const STAR_MAX_COUNT = 6;
 
 // --- Multiplayer ---
-export const MAX_PLAYERS_PER_ROOM = 4;
+export const MAX_PLAYERS_PER_ROOM = 5;
 export const ROOM_NAME = 'patang_room';
 export const PLAYER_COLORS = [
   { primary: '#e8403a', secondary: '#f4b942', name: 'Red-Gold' },
   { primary: '#3d8bfd', secondary: '#42f4e8', name: 'Blue-Cyan' },
   { primary: '#9b59b6', secondary: '#f39c12', name: 'Purple-Orange' },
   { primary: '#2ecc71', secondary: '#e74c3c', name: 'Green-Red' },
+  { primary: '#e67e22', secondary: '#1abc9c', name: 'Amber-Teal' },
 ] as const;
 
 // --- String Fighting (Pench) ---
