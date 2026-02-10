@@ -5,7 +5,7 @@
 // ============================================
 
 import colyseus from 'colyseus';
-const { Room, Client } = colyseus;
+const { Room } = colyseus;
 import {
   GameRoomState,
   PlayerSchema,
@@ -85,7 +85,7 @@ export class PatangRoom extends Room<GameRoomState> {
     console.log(`🏠 Room created: ${this.roomId}`);
   }
 
-  onJoin(client: Client, options: RoomJoinOptions) {
+  onJoin(client: any, options: RoomJoinOptions) {
     const player = new PlayerSchema();
     player.id = client.sessionId;
     player.name = options.name || 'Player';
@@ -114,7 +114,7 @@ export class PatangRoom extends Room<GameRoomState> {
     console.log(`👤 ${player.name} joined (${client.sessionId})`);
   }
 
-  onLeave(client: Client, consented: boolean) {
+  onLeave(client: any, consented: boolean) {
     const player = this.state.players.get(client.sessionId);
 
     if (consented) {
