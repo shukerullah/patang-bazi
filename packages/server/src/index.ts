@@ -1,0 +1,47 @@
+// ============================================
+// PATANG BAZI — Game Server
+// Colyseus server with Express
+// ============================================
+
+import { Server } from 'colyseus';
+import { WebSocketTransport } from '@colyseus/ws-transport';
+import { monitor } from '@colyseus/monitor';
+import express from 'express';
+import http from 'http';
+import { PatangRoom } from './rooms/PatangRoom.js';
+import { ROOM_NAME } from '@patang/shared';
+
+const PORT = Number(process.env.PORT) || 2567;
+
+async function main() {
+  const app = express();
+
+  // Health check
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime() });
+  });
+
+  // Colyseus monitor (dev only)
+  if (process.env.NODE_ENV !== 'production') {
+    app.use('/monitor', monitor());
+  }
+
+  const server = http.createServer(app);
+
+  const gameServer = new Server({
+    transport: new WebSocketTransport({ server }),
+  });
+
+  // Register game room
+  gameServer.define(ROOM_NAME, PatangRoom)
+    .filterBy(['roomCode']);  // Allow private rooms by code
+
+  gameServer.listen(PORT);
+
+  console.log(`🪁 Patang Bazi Server`);
+  console.log(`   → WebSocket: ws://localhost:${PORT}`);
+  console.log(`   → Monitor:   http://localhost:${PORT}/monitor`);
+  console.log(`   → Health:    http://localhost:${PORT}/health`);
+}
+
+main().catch(console.error);
