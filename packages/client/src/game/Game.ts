@@ -422,18 +422,37 @@ export class Game {
 
   private async connectToServer(name: string) {
     const url = getServerUrl();
-    this.lobbyUI.setStatus(`Connecting to ${url}...`);
+
+    // Show loading spinner (Render cold starts can take 30-60s)
+    this.lobbyUI.showLoading('Connecting to server...');
+    this.lobbyUI.setStatus('');
+
+    // Progressive loading messages for slow connections
+    const loadingTimer = setTimeout(() => {
+      this.lobbyUI.showLoading('Server is waking up... hang tight!');
+    }, 5000);
+
+    const loadingTimer2 = setTimeout(() => {
+      this.lobbyUI.showLoading('Almost there... first connection takes a moment');
+    }, 15000);
 
     try {
       this.localPlayerId = await this.network.connect(url, { name });
+      clearTimeout(loadingTimer);
+      clearTimeout(loadingTimer2);
+
+      this.lobbyUI.hideLoading();
       this.penchRenderer.setLocalPlayer(this.localPlayerId);
       this.lobbyUI.setStatus('Connected! Waiting for players...');
       this.network.sendReady(name);
       this.watchServerState();
     } catch (err) {
+      clearTimeout(loadingTimer);
+      clearTimeout(loadingTimer2);
+
+      this.lobbyUI.hideLoading();
       const msg = err instanceof Error ? err.message : String(err);
-      this.lobbyUI.setStatus(`Failed: ${msg}`, true);
-      this.lobbyUI.enableReconnect();
+      this.lobbyUI.showError(`Connection failed: ${msg}`);
     }
   }
 
@@ -533,9 +552,8 @@ export class Game {
     });
 
     this.network.on('disconnected', () => {
-      this.lobbyUI.show();
-      this.lobbyUI.setStatus('Disconnected from server', true);
-      this.lobbyUI.enableReconnect();
+      this.cleanupGameState();
+      this.lobbyUI.showError('Disconnected from server');
     });
   }
 
@@ -603,7 +621,7 @@ export class Game {
     const state = this.network.state;
     if (!state) return;
 
-    this.lobbyUI.show();
+    // Build results string
     let results = '🏆 Game Over! ';
     const sorted = Array.from(state.players.entries() as Iterable<[string, any]>)
       .sort(([, a]: [string, any], [, b]: [string, any]) => b.score - a.score);
@@ -612,8 +630,37 @@ export class Game {
       const you = id === this.localPlayerId ? ' (you)' : '';
       results += `${medal} ${p.name}${you}: ${p.score}  `;
     });
-    this.lobbyUI.setStatus(results);
-    this.lobbyUI.enableReconnect();
+
+    // Show results overlay (inputs disabled)
+    this.lobbyUI.showResults(results);
+
+    // After 3 seconds: disconnect, cleanup, show fresh lobby
+    setTimeout(async () => {
+      await this.network.disconnect();
+      this.cleanupGameState();
+      this.lobbyUI.reset();
+    }, 3000);
+  }
+
+  /** Clean up all game state between sessions */
+  private cleanupGameState() {
+    // Destroy all player views
+    for (const [, view] of this.playerViews) {
+      view.destroy();
+    }
+    this.playerViews.clear();
+
+    // Clear network event listeners (prevents duplicate watchers)
+    this.network.removeAllListeners();
+
+    // Reset game state
+    this.localPlayerId = null;
+    this.gameTime = 0;
+    this.inputSeq = 0;
+    this.inputSendAccum = 0;
+    this.lastSentPull = false;
+    this.lastSentSteer = 0;
+    this.cameraInitialized = false;
   }
 
   // ========================

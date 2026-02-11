@@ -1,6 +1,8 @@
 // ============================================
 // PATANG BAZI — Lobby UI
 // Name entry → connect → waiting → countdown
+// Game over → results → fresh lobby
+// Loading state for slow server wake-up
 // ============================================
 
 export type LobbyCallback = (name: string) => void;
@@ -12,8 +14,12 @@ export class LobbyUI {
   private countdownEl!: HTMLDivElement;
   private connectBtn!: HTMLButtonElement;
   private nameInput!: HTMLInputElement;
+  private loadingEl!: HTMLDivElement;
+  private instructionsEl!: HTMLDivElement;
+  private onConnect: LobbyCallback;
 
   constructor(onConnect: LobbyCallback) {
+    this.onConnect = onConnect;
     this.overlay = document.createElement('div');
     this.overlay.id = 'lobby-overlay';
     this.overlay.innerHTML = `
@@ -54,12 +60,13 @@ export class LobbyUI {
         .lobby-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
         .lobby-status {
           font-size: 14px; color: rgba(255,255,255,0.5); margin-top: 12px;
-          min-height: 20px; transition: color 0.3s;
+          min-height: 20px; transition: color 0.3s; text-align: center;
+          max-width: 500px; line-height: 1.5;
         }
         .lobby-status.error { color: #ff6b6b; }
         .lobby-players {
           margin-top: 20px; display: flex; flex-direction: column;
-          align-items: center; gap: 8px; min-height: 60px;
+          align-items: center; gap: 8px; min-height: 40px;
         }
         .lobby-player {
           background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
@@ -82,6 +89,22 @@ export class LobbyUI {
           background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.2);
           border-radius: 4px; padding: 1px 7px; color: #ffd666; font-weight: 600;
         }
+        /* Loading spinner */
+        .lobby-loading {
+          display: none; flex-direction: column; align-items: center; gap: 16px;
+          margin-top: 12px;
+        }
+        .lobby-loading.active { display: flex; }
+        .lobby-spinner {
+          width: 32px; height: 32px; border-radius: 50%;
+          border: 3px solid rgba(255,255,255,0.1);
+          border-top-color: #ffd666;
+          animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .lobby-loading-text {
+          font-size: 13px; color: rgba(255,255,255,0.45); text-align: center;
+        }
         /* Mobile responsive */
         @media (max-width: 600px) {
           .lobby-kite { font-size: 48px; margin-bottom: 4px; }
@@ -90,7 +113,7 @@ export class LobbyUI {
           .lobby-form { flex-direction: column; gap: 10px; }
           .lobby-input { width: 220px; padding: 10px 16px; font-size: 15px; }
           .lobby-btn { padding: 10px 32px; font-size: 18px; }
-          .lobby-status { font-size: 12px; }
+          .lobby-status { font-size: 12px; max-width: 300px; }
           .lobby-countdown { font-size: 64px; }
           .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; }
         }
@@ -106,10 +129,14 @@ export class LobbyUI {
         <input class="lobby-input" id="lobby-name" type="text" placeholder="Your name..." maxlength="16" />
         <button class="lobby-btn" id="lobby-connect">FLY! 🪁</button>
       </div>
+      <div class="lobby-loading" id="lobby-loading">
+        <div class="lobby-spinner"></div>
+        <div class="lobby-loading-text" id="lobby-loading-text">Waking up server...</div>
+      </div>
       <div class="lobby-status" id="lobby-status"></div>
       <div class="lobby-players" id="lobby-players"></div>
       <div class="lobby-countdown" id="lobby-countdown">3</div>
-      <div class="lobby-instructions">
+      <div class="lobby-instructions" id="lobby-instructions">
         <kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up<br>
         <kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!
       </div>
@@ -121,33 +148,44 @@ export class LobbyUI {
     this.statusEl = document.getElementById('lobby-status') as HTMLDivElement;
     this.playerListEl = document.getElementById('lobby-players') as HTMLDivElement;
     this.countdownEl = document.getElementById('lobby-countdown') as HTMLDivElement;
+    this.loadingEl = document.getElementById('lobby-loading') as HTMLDivElement;
+    this.instructionsEl = document.getElementById('lobby-instructions') as HTMLDivElement;
 
     // Random default name
     const names = ['Ustaad', 'Patangbaaz', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
     this.nameInput.value = names[Math.floor(Math.random() * names.length)] +
       Math.floor(Math.random() * 99);
 
-    // Connect on click or Enter
-    const doConnect = () => {
-      const name = this.nameInput.value.trim() || 'Player';
-      this.connectBtn.disabled = true;
-      this.nameInput.disabled = true;
-      this.setStatus('Connecting...');
-      onConnect(name);
-    };
-
-    this.connectBtn.addEventListener('click', doConnect);
+    this.connectBtn.addEventListener('click', () => this.doConnect());
     this.nameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doConnect();
+      if (e.key === 'Enter') this.doConnect();
     });
 
     // Auto-focus
     setTimeout(() => this.nameInput.focus(), 100);
   }
 
+  private doConnect() {
+    const name = this.nameInput.value.trim() || 'Player';
+    this.connectBtn.disabled = true;
+    this.nameInput.disabled = true;
+    this.onConnect(name);
+  }
+
   setStatus(text: string, isError = false) {
     this.statusEl.textContent = text;
     this.statusEl.classList.toggle('error', isError);
+  }
+
+  /** Show/hide loading spinner (for Render cold starts) */
+  showLoading(text = 'Waking up server...') {
+    this.loadingEl.classList.add('active');
+    const textEl = document.getElementById('lobby-loading-text');
+    if (textEl) textEl.textContent = text;
+  }
+
+  hideLoading() {
+    this.loadingEl.classList.remove('active');
   }
 
   updatePlayers(players: Array<{ name: string; color: string; isLocal: boolean; ready: boolean }>) {
@@ -171,14 +209,46 @@ export class LobbyUI {
 
   show() {
     this.overlay.classList.remove('hidden');
-    this.connectBtn.disabled = false;
-    this.nameInput.disabled = false;
   }
 
-  enableReconnect() {
+  /** Full reset to fresh "FLY!" state (after game over) */
+  reset() {
+    this.overlay.classList.remove('hidden');
     this.connectBtn.disabled = false;
+    this.connectBtn.textContent = 'FLY! 🪁';
     this.nameInput.disabled = false;
-    this.connectBtn.textContent = 'RECONNECT 🪁';
+    this.statusEl.textContent = '';
+    this.statusEl.classList.remove('error');
+    this.playerListEl.innerHTML = '';
+    this.countdownEl.classList.remove('active');
+    this.loadingEl.classList.remove('active');
+    this.instructionsEl.style.display = '';
+    // Keep the player's name from last game
+  }
+
+  /** Show results briefly with disabled input (between games) */
+  showResults(text: string) {
+    this.overlay.classList.remove('hidden');
+    this.connectBtn.disabled = true;
+    this.nameInput.disabled = true;
+    this.statusEl.textContent = text;
+    this.statusEl.classList.remove('error');
+    this.playerListEl.innerHTML = '';
+    this.countdownEl.classList.remove('active');
+    this.loadingEl.classList.remove('active');
+  }
+
+  /** Show error state with reconnect available */
+  showError(text: string) {
+    this.overlay.classList.remove('hidden');
+    this.connectBtn.disabled = false;
+    this.connectBtn.textContent = 'FLY! 🪁';
+    this.nameInput.disabled = false;
+    this.statusEl.textContent = text;
+    this.statusEl.classList.add('error');
+    this.playerListEl.innerHTML = '';
+    this.countdownEl.classList.remove('active');
+    this.loadingEl.classList.remove('active');
   }
 
   destroy() {

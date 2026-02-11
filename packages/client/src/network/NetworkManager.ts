@@ -26,6 +26,9 @@ export class NetworkManager {
   // --- Connection ---
 
   async connect(serverUrl: string, options: RoomJoinOptions): Promise<string> {
+    // Always disconnect cleanly before reconnecting
+    await this.disconnect();
+
     this.client = new Client(serverUrl);
 
     if (options.roomCode) {
@@ -34,7 +37,8 @@ export class NetworkManager {
       this._room = await this.client.joinOrCreate(ROOM_NAME, options);
     }
 
-    this.setupListeners();
+    this.pendingInputs = [];
+    this.setupRoomListeners();
     console.log(`🌐 Connected: room=${this._room.id} session=${this._room.sessionId}`);
     this.emit('connected', this._room.sessionId);
     return this._room.sessionId;
@@ -42,10 +46,19 @@ export class NetworkManager {
 
   async disconnect() {
     if (this._room) {
-      await this._room.leave();
+      try {
+        await this._room.leave(true); // consented leave
+      } catch {
+        // Room may already be gone
+      }
       this._room = null;
     }
-    this.emit('disconnected');
+    this.pendingInputs = [];
+  }
+
+  /** Clear all event listeners (call between games) */
+  removeAllListeners() {
+    this.listeners.clear();
   }
 
   get room(): Room<any> | null { return this._room; }
@@ -68,19 +81,15 @@ export class NetworkManager {
     this._room?.send(MessageType.PLAYER_READY, { name });
   }
 
-  sendRematch() {
-    this._room?.send(MessageType.REQUEST_REMATCH, {});
-  }
-
   /** Get inputs server hasn't processed yet (for reconciliation) */
   getPendingInputs(lastProcessedSeq: number): PlayerInput[] {
     this.pendingInputs = this.pendingInputs.filter(i => i.seq > lastProcessedSeq);
     return this.pendingInputs;
   }
 
-  // --- Listeners ---
+  // --- Room Listeners (on the Colyseus room object) ---
 
-  private setupListeners() {
+  private setupRoomListeners() {
     if (!this._room) return;
 
     // Game events via messages
@@ -123,6 +132,7 @@ export class NetworkManager {
 
     this._room.onLeave((code) => {
       console.log(`Left room (code: ${code})`);
+      this._room = null;
       this.emit('disconnected');
     });
   }

@@ -78,6 +78,8 @@ export class PatangRoom extends Room<GameRoomState> {
     this.maxClients = MAX_PLAYERS_PER_ROOM;
 
     this.onMessage(MessageType.INPUT, (client, input: PlayerInput) => {
+      // Clamp steer to [-1, 1] to prevent cheating
+      input.steer = Math.max(-1, Math.min(1, input.steer || 0));
       this.currentInputs.set(client.sessionId, input);
     });
 
@@ -229,6 +231,15 @@ export class PatangRoom extends Room<GameRoomState> {
 
     this.broadcast(MessageType.GAME_OVER, { rankings });
     console.log(`🏆 Game over in room ${this.roomId}`);
+
+    // Auto-disconnect all clients after a grace period
+    // (clients should disconnect themselves after seeing results,
+    //  but this ensures cleanup if they don't)
+    setTimeout(() => {
+      if (this.state.phase === 'finished') {
+        this.disconnect();
+      }
+    }, 10000);
   }
 
   // --- Main Tick ---
