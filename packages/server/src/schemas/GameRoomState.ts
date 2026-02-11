@@ -1,7 +1,5 @@
 // ============================================
 // PATANG BAZI — Colyseus State Schema
-// Defines the authoritative game state that
-// gets synchronized to all clients efficiently
 // ============================================
 
 import { Schema, type, MapSchema, ArraySchema } from '@colyseus/schema';
@@ -44,12 +42,23 @@ export class WindSchema extends Schema {
   @type('float32') changeTimer: number = 5;
 }
 
+export class PenchSchema extends Schema {
+  @type('string') id: string = '';           // "playerA_playerB"
+  @type('string') playerAId: string = '';
+  @type('string') playerBId: string = '';
+  @type('float32') progress: number = 0;    // 0 → 1, at 1 string is cut
+  @type(Vec2Schema) position = new Vec2Schema();
+  @type('boolean') active: boolean = true;
+  @type('string') winnerId: string = '';     // who's winning (pulling harder)
+}
+
 export class GameRoomState extends Schema {
-  @type('string') phase: string = 'waiting'; // waiting | countdown | playing | finished
+  @type('string') phase: string = 'waiting';
   @type({ map: PlayerSchema }) players = new MapSchema<PlayerSchema>();
   @type(WindSchema) wind = new WindSchema();
   @type([StarSchema]) stars = new ArraySchema<StarSchema>();
+  @type([PenchSchema]) penches = new ArraySchema<PenchSchema>();
   @type('uint32') tick: number = 0;
-  @type('float32') timeRemaining: number = 180; // 3 minute matches
+  @type('float32') timeRemaining: number = 180;
   @type('uint8') countdown: number = 0;
 }

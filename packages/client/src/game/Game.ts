@@ -1,6 +1,6 @@
 // ============================================
 // PATANG BAZI — Game Core (Multiplayer)
-// Server-authoritative with visual renderers
+// Server-authoritative with pench, sound, shake
 // ============================================
 
 import { Application, Container } from 'pixi.js';
@@ -13,6 +13,9 @@ import { BirdRenderer } from '../systems/BirdRenderer';
 import { StarRenderer, type StarData } from '../systems/StarRenderer';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { PlayerView } from '../systems/PlayerView';
+import { PenchRenderer } from '../systems/PenchRenderer';
+import { SoundManager } from '../systems/SoundManager';
+import { ScreenShake } from '../systems/ScreenShake';
 import { LobbyUI } from '../ui/LobbyUI';
 import {
   WORLD_WIDTH,
@@ -20,13 +23,13 @@ import {
   FIXED_DT,
   PLAYER_COLORS,
   STAR_POINTS,
+  SCORE_KITE_CUT,
   stepKite,
   type PlayerInput,
   type KiteState,
   type WindState,
 } from '@patang/shared';
 
-// Server URL — auto-detect from page host
 function getServerUrl(): string {
   const host = window.location.hostname;
   const port = 2567;
@@ -53,16 +56,19 @@ export class Game {
   private starRenderer!: StarRenderer;
   private particleSystem!: ParticleSystem;
 
-  // Per-player views (created/destroyed dynamically)
+  // Pench + Effects
+  private penchRenderer!: PenchRenderer;
+  private sound!: SoundManager;
+  private screenShake!: ScreenShake;
+
+  // Per-player views
   private playerViews = new Map<string, PlayerView>();
   private localPlayerId: string | null = null;
   public playerName = 'Player';
 
-  // Game time
+  // Timers
   private gameTime = 0;
   private inputSeq = 0;
-
-  // Client-side prediction state for local player
 
   // UI
   private lobbyUI!: LobbyUI;
@@ -72,9 +78,10 @@ export class Game {
   private hudHeight!: HTMLElement;
   private hudScore!: HTMLElement;
   private hudWind!: HTMLElement;
-  private hudPlayers!: HTMLElement;
   private hudPhase!: HTMLElement;
   private hudTime!: HTMLElement;
+  private hudPlayers!: HTMLElement;
+  private muteBtn!: HTMLButtonElement;
 
   constructor(app: Application, input: InputManager, network: NetworkManager) {
     this.app = app;
@@ -83,10 +90,10 @@ export class Game {
   }
 
   async init() {
+    this.sound = new SoundManager();
     this.setupSceneGraph();
     this.setupRenderers();
     this.setupHUD();
-    this.setupNetworkEvents();
     this.showLobby();
     this.startRenderLoop();
   }
@@ -111,6 +118,7 @@ export class Game {
       this.effectLayer,
     );
 
+    this.screenShake = new ScreenShake(this.worldContainer);
     this.onResize(window.innerWidth, window.innerHeight);
   }
 
@@ -120,6 +128,7 @@ export class Game {
     this.birdRenderer = new BirdRenderer(this.cloudLayer);
     new GroundRenderer(this.skyLayer);
     this.starRenderer = new StarRenderer(this.gameLayer);
+    this.penchRenderer = new PenchRenderer(this.effectLayer);
     this.particleSystem = new ParticleSystem(this.effectLayer);
   }
 
@@ -140,10 +149,8 @@ export class Game {
           font-family: 'Baloo 2', cursive; font-size: 24px; font-weight: 800; color: #fff;
           text-shadow: 0 2px 20px rgba(255,150,50,0.4); line-height: 1;
         }
-        .hud-phase {
-          font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 500;
-        }
-        .stats { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+        .hud-phase { font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 500; }
+        .stats { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
         .stat-pill {
           background: rgba(0,0,0,0.35); backdrop-filter: blur(12px);
           border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
@@ -151,6 +158,14 @@ export class Game {
           color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 5px;
         }
         .stat-pill .val { color: #ffd666; font-weight: 700; font-size: 13px; }
+        .mute-btn {
+          background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 50%; width: 32px; height: 32px;
+          font-size: 16px; cursor: pointer; pointer-events: auto;
+          display: flex; align-items: center; justify-content: center;
+          color: rgba(255,255,255,0.7); transition: background 0.2s;
+        }
+        .mute-btn:hover { background: rgba(255,255,255,0.1); }
         #score-popup {
           position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
           z-index: 20; pointer-events: none;
@@ -159,6 +174,7 @@ export class Game {
           opacity: 0; transition: opacity 0.3s, transform 0.3s;
         }
         #score-popup.show { opacity: 1; transform: translate(-50%, -60%); }
+        #score-popup.cut { color: #ff4444; text-shadow: 0 4px 30px rgba(255,50,50,0.6); }
         .scoreboard {
           position: fixed; top: 50px; right: 16px; z-index: 10; pointer-events: none;
           display: flex; flex-direction: column; gap: 4px;
@@ -168,8 +184,10 @@ export class Game {
           border-radius: 8px; padding: 4px 12px; font-size: 12px;
           color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 8px;
           border: 1px solid rgba(255,255,255,0.06);
+          font-family: 'Poppins', sans-serif;
         }
         .sb-row.local { border-color: rgba(255,214,102,0.3); }
+        .sb-row.dead { opacity: 0.4; }
         .sb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .sb-name { flex: 1; }
         .sb-score { color: #ffd666; font-weight: 700; }
@@ -200,12 +218,13 @@ export class Game {
         <div class="stat-pill">📍 <span class="val" id="hAlt">0</span>m</div>
         <div class="stat-pill">⭐ <span class="val" id="hScore">0</span></div>
         <div class="stat-pill">💨 <span class="val" id="hWind">→</span></div>
+        <button class="mute-btn" id="muteBtn">🔊</button>
       </div>
     `;
     document.body.appendChild(hud);
     this.hudEl = hud;
 
-    // Scoreboard container
+    // Scoreboard
     const sb = document.createElement('div');
     sb.className = 'scoreboard';
     sb.id = 'scoreboard';
@@ -223,7 +242,7 @@ export class Game {
       <div class="controls-inner">
         <span><kbd>SPACE</kbd> / <kbd>CLICK</kbd> Pull up</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Steer</span>
-        <span>Release to glide</span>
+        <span>Cross strings to cut opponents!</span>
       </div>
     `;
     document.body.appendChild(controls);
@@ -234,6 +253,13 @@ export class Game {
     this.hudPhase = document.getElementById('hPhase')!;
     this.hudTime = document.getElementById('hTime')!;
     this.hudPlayers = document.getElementById('scoreboard')!;
+    this.muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
+
+    // Mute toggle
+    this.muteBtn.addEventListener('click', () => {
+      const muted = this.sound.toggleMute();
+      this.muteBtn.textContent = muted ? '🔇' : '🔊';
+    });
   }
 
   // ========================
@@ -243,6 +269,8 @@ export class Game {
   private showLobby() {
     this.lobbyUI = new LobbyUI((name) => {
       this.playerName = name;
+      // Init sound on first user interaction
+      this.sound.init();
       this.connectToServer(name);
     });
   }
@@ -253,6 +281,7 @@ export class Game {
 
     try {
       this.localPlayerId = await this.network.connect(url, { name });
+      this.penchRenderer.setLocalPlayer(this.localPlayerId);
       this.lobbyUI.setStatus('Connected! Waiting for players...');
       this.network.sendReady(name);
       this.watchServerState();
@@ -271,7 +300,7 @@ export class Game {
     const room = this.network.room;
     if (!room) return;
 
-    // Watch players join/leave
+    // Players join/leave
     room.state.players.onAdd((player: any, sessionId: string) => {
       console.log(`👤 Player added: ${player.name} (${sessionId})`);
       this.createPlayerView(sessionId, player);
@@ -284,44 +313,73 @@ export class Game {
       this.updateLobbyPlayers();
     });
 
-    // Watch phase changes
+    // Phase changes
     room.state.listen('phase', (phase: string) => {
       console.log(`🎮 Phase: ${phase}`);
-      if (phase === 'countdown') {
-        this.onCountdown();
-      } else if (phase === 'playing') {
-        this.onGameStart();
-      } else if (phase === 'finished') {
-        this.onGameEnd();
+      if (phase === 'playing') this.onGameStart();
+      else if (phase === 'finished') this.onGameEnd();
+    });
+
+    // Countdown
+    room.state.listen('countdown', (n: number) => {
+      if (n > 0) {
+        this.lobbyUI.showCountdown(n);
+        this.sound.playCountdownBeep(n === 0);
       }
     });
 
-    // Watch countdown
-    room.state.listen('countdown', (n: number) => {
-      if (n > 0) this.lobbyUI.showCountdown(n);
-    });
-
-    // Watch star events
+    // Star collected
     this.network.on('starCollected', (msg: any) => {
       const pos = this.starRenderer.collectStar(msg.starId);
       if (pos) this.particleSystem.burst(pos);
+      this.sound.playStarCollect();
       if (msg.playerId === this.localPlayerId) {
         this.showScorePopup(`+${STAR_POINTS} ⭐`);
+        this.screenShake.light();
       }
     });
 
-    // Watch kite cut events
+    // Pench start
+    this.network.on('penchStart', (msg: any) => {
+      this.penchRenderer.onPenchStart(msg.key, msg.playerAId, msg.playerBId, msg.position);
+    });
+
+    // Pench update (with sparks)
+    this.network.on('penchUpdate', (msg: any) => {
+      this.penchRenderer.onPenchUpdate(msg.key, msg.progress, msg.position);
+      if (msg.spark) {
+        this.sound.playPenchSpark();
+        // Light shake during pench if local player involved
+        if (msg.progress > 0.5 &&
+          (this.isLocalInvolved(msg.key))) {
+          this.screenShake.light();
+        }
+      }
+    });
+
+    // Pench end
+    this.network.on('penchEnd', (msg: any) => {
+      if (msg.key) this.penchRenderer.onPenchEnd(msg.key);
+    });
+
+    // Kite cut!
     this.network.on('kiteCut', (msg: any) => {
       if (msg.position) {
+        this.penchRenderer.cutBurst(msg.position);
         this.particleSystem.burst(msg.position, 20);
       }
+      this.sound.playKiteCut();
+      this.sound.playCrowdCheer();
+      this.screenShake.heavy();
+
       if (msg.victimId === this.localPlayerId) {
-        this.showScorePopup('✂️ CUT!');
+        this.showScorePopup('✂️ BO KATA!', true);
       } else if (msg.cutterId === this.localPlayerId) {
-        this.showScorePopup('🔥 +50 CUT!');
+        this.showScorePopup(`🔥 +${SCORE_KITE_CUT} CUT!`);
       }
     });
 
+    // Disconnect
     this.network.on('disconnected', () => {
       this.lobbyUI.show();
       this.lobbyUI.setStatus('Disconnected from server', true);
@@ -329,30 +387,28 @@ export class Game {
     });
   }
 
+  /** Check if local player is involved in a pench by key */
+  private isLocalInvolved(key: string): boolean {
+    return !!this.localPlayerId && key.includes(this.localPlayerId);
+  }
+
   // ========================
-  // PLAYER VIEW MANAGEMENT
+  // PLAYER VIEWS
   // ========================
 
   private createPlayerView(sessionId: string, player: any) {
     if (this.playerViews.has(sessionId)) return;
-
     const isLocal = sessionId === this.localPlayerId;
     const view = new PlayerView(
-      this.gameLayer,
-      sessionId,
-      player.name || 'Player',
-      player.colorIndex ?? 0,
-      isLocal,
+      this.gameLayer, sessionId, player.name || 'Player',
+      player.colorIndex ?? 0, isLocal,
     );
     this.playerViews.set(sessionId, view);
   }
 
   private removePlayerView(sessionId: string) {
     const view = this.playerViews.get(sessionId);
-    if (view) {
-      view.destroy();
-      this.playerViews.delete(sessionId);
-    }
+    if (view) { view.destroy(); this.playerViews.delete(sessionId); }
   }
 
   private updateLobbyPlayers() {
@@ -363,42 +419,35 @@ export class Game {
     state.players.forEach((p: any, id: string) => {
       const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
       players.push({
-        name: p.name || 'Player',
-        color: palette.primary,
-        isLocal: id === this.localPlayerId,
-        ready: p.ready,
+        name: p.name || 'Player', color: palette.primary,
+        isLocal: id === this.localPlayerId, ready: p.ready,
       });
     });
 
     this.lobbyUI.updatePlayers(players);
-    const readyCount = players.filter(p => p.ready).length;
     const total = players.length;
     if (total < 2) {
       this.lobbyUI.setStatus(`Waiting for opponent... (${total}/2 min)`);
     } else {
-      this.lobbyUI.setStatus(`${readyCount}/${total} ready`);
+      this.lobbyUI.setStatus(`${players.filter(p => p.ready).length}/${total} ready`);
     }
   }
 
   // ========================
-  // GAME PHASE TRANSITIONS
+  // GAME PHASE
   // ========================
-
-  private onCountdown() {
-    // Lobby shows countdown overlay
-  }
 
   private onGameStart() {
     this.lobbyUI.hide();
     this.gameTime = 0;
     this.inputSeq = 0;
+    this.sound.playCountdownBeep(true);
   }
 
   private onGameEnd() {
     const state = this.network.state;
     if (!state) return;
 
-    // Show results in lobby
     this.lobbyUI.show();
     let results = '🏆 Game Over! ';
     const sorted = Array.from(state.players.entries() as Iterable<[string, any]>)
@@ -410,14 +459,6 @@ export class Game {
     });
     this.lobbyUI.setStatus(results);
     this.lobbyUI.enableReconnect();
-  }
-
-  // ========================
-  // NETWORK EVENTS
-  // ========================
-
-  private setupNetworkEvents() {
-    // Additional network handlers if needed
   }
 
   // ========================
@@ -436,21 +477,27 @@ export class Game {
     const state = this.network.state;
     const isPlaying = state?.phase === 'playing';
 
-    // --- Always render background ---
-    this.skyRenderer.update(this.gameTime);
+    // Wind (from server or default)
     const wind: WindState = state
       ? { speed: state.wind.speed, direction: state.wind.direction, changeTimer: state.wind.changeTimer }
       : { speed: 1, direction: 1, changeTimer: 5 };
+
+    // --- Background (always) ---
+    this.skyRenderer.update(this.gameTime);
     this.cloudRenderer.update(wind);
     this.birdRenderer.update(this.gameTime, dt);
 
+    // --- Sound: wind ambience ---
+    this.sound.setWindIntensity(wind.speed);
+
     if (!isPlaying || !state) {
-      // During lobby, just show sky
       this.particleSystem.update(dt);
+      this.penchRenderer.update(dt);
+      this.screenShake.update(dt);
       return;
     }
 
-    // --- Send local input to server ---
+    // --- Send input ---
     const input: PlayerInput = {
       seq: ++this.inputSeq,
       timestamp: this.gameTime,
@@ -459,15 +506,17 @@ export class Game {
     };
     this.network.sendInput(input);
 
-    // --- Sync stars from server ---
+    // --- Sound: string tension ---
+    this.sound.setTension(input.pull ? 1 : 0);
+
+    // --- Stars ---
     const starList: StarData[] = [];
     if (state.stars) {
       state.stars.forEach((s: any) => {
         starList.push({
           id: s.id,
           position: { x: s.position.x, y: s.position.y },
-          size: s.size,
-          active: s.active,
+          size: s.size, active: s.active,
           pulse: this.gameTime * 2,
         });
       });
@@ -475,7 +524,20 @@ export class Game {
     this.starRenderer.syncStars(starList);
     this.starRenderer.update(this.gameTime);
 
-    // --- Render each player from server state ---
+    // --- Sync pench state from server schema ---
+    if (state.penches) {
+      const activeKeys = new Set<string>();
+      state.penches.forEach((p: any) => {
+        if (!p.active) return;
+        activeKeys.add(p.id);
+        // Create or update pench renderer
+        this.penchRenderer.onPenchUpdate(p.id, p.progress, { x: p.position.x, y: p.position.y });
+        // Start if new (idempotent)
+        this.penchRenderer.onPenchStart(p.id, p.playerAId, p.playerBId, { x: p.position.x, y: p.position.y });
+      });
+    }
+
+    // --- Render players ---
     state.players.forEach((player: any, sessionId: string) => {
       const view = this.playerViews.get(sessionId);
       if (!view) return;
@@ -487,13 +549,11 @@ export class Game {
         tailPhase: player.kite.tailPhase,
         alive: player.kite.alive,
       };
-
       const anchor = { x: player.anchorPosition.x, y: player.anchorPosition.y };
       const isLocal = sessionId === this.localPlayerId;
 
-      // Local player: client-side prediction for smoother feel
-      if (isLocal && this.input.isPulling() !== undefined) {
-        // Run prediction: take server state, replay unprocessed inputs
+      if (isLocal) {
+        // Client-side prediction
         const pending = this.network.getPendingInputs(player.lastProcessedInput);
         let predicted = { ...kite };
         for (const pi of pending) {
@@ -502,18 +562,18 @@ export class Game {
         }
         view.update(predicted, anchor, wind, this.input.isPulling(), this.gameTime);
       } else {
-        // Remote players: render server state directly
         view.update(kite, anchor, wind, false, this.gameTime);
       }
 
-      // Update name if changed
       view.setName(player.name || 'Player');
     });
 
-    // Particles
+    // --- Effects ---
+    this.penchRenderer.update(dt);
     this.particleSystem.update(dt);
+    this.screenShake.update(dt);
 
-    // HUD
+    // --- HUD ---
     this.updateHUD(state, wind);
   }
 
@@ -524,7 +584,6 @@ export class Game {
   private updateHUD(state: any, wind: WindState) {
     const localPlayer = state.players.get(this.localPlayerId);
 
-    // Height
     if (localPlayer) {
       const heightM = Math.max(0, Math.round(
         (localPlayer.anchorPosition.y - localPlayer.kite.position.y) / (WORLD_HEIGHT * 0.008)
@@ -539,9 +598,7 @@ export class Game {
 
     // Time
     const secs = Math.max(0, Math.ceil(state.timeRemaining));
-    const mins = Math.floor(secs / 60);
-    const s = secs % 60;
-    this.hudTime.textContent = `${mins}:${String(s).padStart(2, '0')}`;
+    this.hudTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
     // Phase
     this.hudPhase.textContent = state.phase === 'playing'
@@ -555,10 +612,11 @@ export class Game {
     for (const [id, p] of sorted) {
       const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
       const isLocal = id === this.localPlayerId;
+      const isDead = !p.kite.alive;
       rows.push(`
-        <div class="sb-row${isLocal ? ' local' : ''}">
+        <div class="sb-row${isLocal ? ' local' : ''}${isDead ? ' dead' : ''}">
           <div class="sb-dot" style="background:${palette.primary}"></div>
-          <span class="sb-name">${p.name || 'Player'}</span>
+          <span class="sb-name">${p.name || 'Player'}${isDead ? ' ✂️' : ''}</span>
           <span class="sb-score">${p.score}</span>
         </div>
       `);
@@ -572,24 +630,25 @@ export class Game {
 
   private scorePopupTimer = 0;
 
-  private showScorePopup(text: string) {
+  private showScorePopup(text: string, isCut = false) {
     const el = document.getElementById('score-popup')!;
     el.textContent = text;
-    el.classList.add('show');
+    el.className = 'show' + (isCut ? ' cut' : '');
     clearTimeout(this.scorePopupTimer as unknown as number);
     this.scorePopupTimer = window.setTimeout(() => {
-      el.classList.remove('show');
-    }, 1200);
+      el.className = '';
+    }, 1500);
   }
 
   onResize(screenW: number, screenH: number) {
     const scaleX = screenW / WORLD_WIDTH;
     const scaleY = screenH / WORLD_HEIGHT;
     const scale = Math.min(scaleX, scaleY);
+    const baseX = (screenW - WORLD_WIDTH * scale) / 2;
+    const baseY = (screenH - WORLD_HEIGHT * scale) / 2;
+
     this.worldContainer.scale.set(scale);
-    this.worldContainer.position.set(
-      (screenW - WORLD_WIDTH * scale) / 2,
-      (screenH - WORLD_HEIGHT * scale) / 2,
-    );
+    this.screenShake.saveBase(baseX, baseY);
+    this.worldContainer.position.set(baseX, baseY);
   }
 }

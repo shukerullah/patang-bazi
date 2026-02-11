@@ -92,6 +92,18 @@ export class NetworkManager {
       this.emit('kiteCut', msg);
     });
 
+    this._room.onMessage(MessageType.PENCH_START, (msg: any) => {
+      this.emit('penchStart', msg);
+    });
+
+    this._room.onMessage(MessageType.PENCH_UPDATE, (msg: any) => {
+      this.emit('penchUpdate', msg);
+    });
+
+    this._room.onMessage(MessageType.PENCH_END, (msg: any) => {
+      this.emit('penchEnd', msg);
+    });
+
     this._room.onMessage(MessageType.GAME_OVER, (msg: GameOverMessage) => {
       this.emit('gameOver', msg);
     });
