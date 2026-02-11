@@ -1,6 +1,7 @@
 // ============================================
 // PATANG BAZI — Patang Room
 // Server-authoritative game room
+// Hot-join: new players enter mid-game instantly
 // Progressive pench system
 // ============================================
 
@@ -59,6 +60,7 @@ export class PatangRoom extends Room<GameRoomState> {
   private currentInputs = new Map<string, PlayerInput>();
   private gameTime = 0;
   private physicsInterval: ReturnType<typeof setInterval> | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private colorAssignment = 0;
   private rngSeed = Date.now();
 
@@ -68,13 +70,12 @@ export class PatangRoom extends Room<GameRoomState> {
   // Spark sound throttle
   private lastSparkBroadcast = 0;
 
-  onCreate(options: RoomJoinOptions) {
+  // Min players to start the first game
+  private static MIN_PLAYERS_TO_START = 1; // Change to 2 for production
+
+  onCreate(_options: RoomJoinOptions) {
     this.setState(new GameRoomState());
     this.maxClients = MAX_PLAYERS_PER_ROOM;
-
-    if (options.roomCode) {
-      this.setMetadata({ roomCode: options.roomCode });
-    }
 
     this.onMessage(MessageType.INPUT, (client, input: PlayerInput) => {
       this.currentInputs.set(client.sessionId, input);
@@ -86,31 +87,40 @@ export class PatangRoom extends Room<GameRoomState> {
         player.name = data.name || 'Player';
         player.ready = true;
       }
-      this.checkAllReady();
-    });
 
-    this.onMessage(MessageType.REQUEST_REMATCH, (_client) => {
-      // TODO: rematch voting
+      // Only trigger countdown if we're still in waiting phase
+      if (this.state.phase === 'waiting') {
+        this.checkAllReady();
+      }
+      // If game is already playing, player is already hot-joined (see onJoin)
     });
 
     console.log(`🏠 Room created: ${this.roomId}`);
   }
 
   onJoin(client: any, options: RoomJoinOptions) {
+    const isHotJoin = this.state.phase === 'playing' || this.state.phase === 'countdown';
+
     const player = new PlayerSchema();
     player.id = client.sessionId;
     player.name = options.name || 'Player';
     player.colorIndex = this.colorAssignment % PLAYER_COLORS.length;
     player.connected = true;
 
-    const playerCount = this.state.players.size;
+    // Position: spread players evenly across the world
+    const playerIndex = this.state.players.size;
     const spacing = WORLD_WIDTH / (MAX_PLAYERS_PER_ROOM + 1);
-    player.anchorPosition.x = spacing * (playerCount + 1);
+    player.anchorPosition.x = spacing * (playerIndex + 1);
     player.anchorPosition.y = GROUND_Y;
 
     player.kite.position.x = player.anchorPosition.x;
     player.kite.position.y = WORLD_HEIGHT * 0.65;
     player.kite.alive = true;
+
+    // Hot-join: player is immediately ready and active
+    if (isHotJoin) {
+      player.ready = true;
+    }
 
     this.state.players.set(client.sessionId, player);
     this.currentInputs.set(client.sessionId, {
@@ -118,11 +128,21 @@ export class PatangRoom extends Room<GameRoomState> {
     });
 
     this.colorAssignment++;
-    console.log(`👤 ${player.name} joined (${client.sessionId})`);
+
+    // Notify ALL clients about the join (for toast notifications)
+    this.broadcast(MessageType.PLAYER_JOINED, {
+      playerId: client.sessionId,
+      name: player.name,
+      colorIndex: player.colorIndex,
+      hotJoin: isHotJoin,
+    });
+
+    console.log(`👤 ${player.name} joined (${client.sessionId}) [hot=${isHotJoin}]`);
   }
 
   onLeave(client: any, consented: boolean) {
     const player = this.state.players.get(client.sessionId);
+    const playerName = player?.name || 'Player';
 
     if (consented) {
       this.state.players.delete(client.sessionId);
@@ -133,7 +153,13 @@ export class PatangRoom extends Room<GameRoomState> {
       if (player) player.connected = false;
     }
 
-    console.log(`👤 Player left: ${client.sessionId} (consented: ${consented})`);
+    // Notify remaining players
+    this.broadcast(MessageType.PLAYER_LEFT, {
+      playerId: client.sessionId,
+      name: playerName,
+    });
+
+    console.log(`👤 ${playerName} left: ${client.sessionId} (consented: ${consented})`);
 
     const activePlayers = Array.from(this.state.players.values()).filter(p => p.connected);
     if (activePlayers.length === 0 && this.state.phase === 'playing') {
@@ -143,26 +169,30 @@ export class PatangRoom extends Room<GameRoomState> {
 
   onDispose() {
     if (this.physicsInterval) clearInterval(this.physicsInterval);
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
     console.log(`🏠 Room disposed: ${this.roomId}`);
   }
 
   // --- Game Flow ---
 
   private checkAllReady() {
+    // Only called when phase === 'waiting'
     const players = Array.from(this.state.players.values());
-    if (players.length < 1) return;  // Min 1 for testing, 2 for prod
+    if (players.length < PatangRoom.MIN_PLAYERS_TO_START) return; // Min 1 for testing, 2 for prod
     if (!players.every(p => p.ready)) return;
     this.startCountdown();
   }
 
   private startCountdown() {
+    if (this.state.phase !== 'waiting') return; // Guard: only from waiting
+
     this.state.phase = 'countdown';
     this.state.countdown = 3;
-    const countdownInterval = setInterval(() => {
+
+    this.countdownInterval = setInterval(() => {
       this.state.countdown--;
-      this.broadcast(MessageType.PENCH_END, { type: 'countdown_beep', n: this.state.countdown });
       if (this.state.countdown <= 0) {
-        clearInterval(countdownInterval);
+        if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = null; }
         this.startGame();
       }
     }, 1000);
@@ -187,6 +217,7 @@ export class PatangRoom extends Room<GameRoomState> {
   private endGame() {
     this.state.phase = 'finished';
     if (this.physicsInterval) { clearInterval(this.physicsInterval); this.physicsInterval = null; }
+    if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = null; }
 
     // Clean all penches
     this.activePenches.clear();
@@ -340,10 +371,8 @@ export class PatangRoom extends Room<GameRoomState> {
             this.state.penches.push(schema);
 
             tracker = {
-              playerAId: a.id,
-              playerBId: b.id,
-              progress: 0,
-              winnerId,
+              playerAId: a.id, playerBId: b.id,
+              progress: 0, winnerId,
               ticksSinceStart: 0,
               schemaIndex: this.state.penches.length - 1,
             };
@@ -373,11 +402,8 @@ export class PatangRoom extends Room<GameRoomState> {
           if (this.gameTime - this.lastSparkBroadcast > 0.15) {
             this.lastSparkBroadcast = this.gameTime;
             this.broadcast(MessageType.PENCH_UPDATE, {
-              key,
-              progress: tracker.progress,
-              position: result.position,
-              winnerId,
-              spark: true,
+              key, progress: tracker.progress,
+              position: result.position, winnerId, spark: true,
             });
           }
 
@@ -396,24 +422,19 @@ export class PatangRoom extends Room<GameRoomState> {
       if (!currentCrossings.has(key)) {
         // Decay progress when not crossing (keeps some tension)
         tracker.progress = Math.max(0, tracker.progress - FIXED_DT * 0.8);
-
         if (tracker.progress <= 0) {
           this.endPench(key);
         } else {
           // Update schema with decaying progress
           const schema = this.state.penches[tracker.schemaIndex];
-          if (schema) {
-            schema.progress = tracker.progress;
-          }
+          if (schema) schema.progress = tracker.progress;
         }
       }
     }
   }
 
   private resolvePenchCut(
-    key: string,
-    winner: PlayerSchema,
-    loser: PlayerSchema,
+    key: string, winner: PlayerSchema, loser: PlayerSchema,
     position: { x: number; y: number },
   ) {
     // Cut the loser's kite
@@ -421,9 +442,7 @@ export class PatangRoom extends Room<GameRoomState> {
     winner.score += SCORE_KITE_CUT;
 
     this.broadcast(MessageType.KITE_CUT, {
-      cutterId: winner.id,
-      victimId: loser.id,
-      position,
+      cutterId: winner.id, victimId: loser.id, position,
     });
 
     // Clean up pench
@@ -450,18 +469,15 @@ export class PatangRoom extends Room<GameRoomState> {
 
     // Remove from schema array
     const idx = this.state.penches.findIndex(p => p.id === key);
-    if (idx >= 0) {
-      this.state.penches.splice(idx, 1);
-    }
+    if (idx >= 0) this.state.penches.splice(idx, 1);
 
-    // Reindex remaining trackers
+    // Reindex all remaining trackers
     for (const [, t] of this.activePenches) {
       const newIdx = this.state.penches.findIndex(p => p.id === penchKey(t.playerAId, t.playerBId));
       if (newIdx >= 0) t.schemaIndex = newIdx;
     }
 
     this.activePenches.delete(key);
-
     this.broadcast(MessageType.PENCH_END, { key });
   }
 
@@ -472,9 +488,7 @@ export class PatangRoom extends Room<GameRoomState> {
         toRemove.push(key);
       }
     }
-    for (const key of toRemove) {
-      this.endPench(key);
-    }
+    for (const key of toRemove) this.endPench(key);
   }
 
   // --- Stars ---

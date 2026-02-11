@@ -1,19 +1,32 @@
 // ============================================
 // PATANG BAZI — Sound Manager
 // Procedural Web Audio sounds — no files needed
-// Wind loop, string tension, star chime, cut snap,
-// crowd cheer, pench sparks
+// All param values guarded against NaN/Infinity
 // ============================================
+
+/** Safely set an AudioParam value, skipping NaN/Infinity */
+function safeRamp(param: AudioParam, value: number, time: number) {
+  if (!Number.isFinite(value) || !Number.isFinite(time)) return;
+  param.linearRampToValueAtTime(value, Math.max(time, 0));
+}
+
+function safeSet(param: AudioParam, value: number, time: number) {
+  if (!Number.isFinite(value) || !Number.isFinite(time)) return;
+  param.setValueAtTime(value, Math.max(time, 0));
+}
+
+function safeExpRamp(param: AudioParam, value: number, time: number) {
+  if (!Number.isFinite(value) || !Number.isFinite(time) || value <= 0) return;
+  param.exponentialRampToValueAtTime(value, Math.max(time, 0));
+}
 
 export class SoundManager {
   private ctx: AudioContext | null = null;
   private masterGain!: GainNode;
+  private initialized = false;
 
   // Looping sounds
-  public windOsc: OscillatorNode | null = null;
   private windGain: GainNode | null = null;
-  private windLfo: OscillatorNode | null = null;
-
   private tensionOsc: OscillatorNode | null = null;
   private tensionGain: GainNode | null = null;
 
@@ -21,20 +34,26 @@ export class SoundManager {
 
   /** Must be called after user interaction (click/key) */
   init() {
-    if (this.ctx) return;
+    if (this.initialized) return;
 
-    this.ctx = new AudioContext();
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.4;
-    this.masterGain.connect(this.ctx.destination);
+    try {
+      this.ctx = new AudioContext();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = 0.4;
+      this.masterGain.connect(this.ctx.destination);
 
-    this.startWindLoop();
-    this.startTensionLoop();
+      this.startWindLoop();
+      this.startTensionLoop();
+      this.initialized = true;
+    } catch (e) {
+      console.warn('Audio init failed:', e);
+    }
   }
 
-  private ensure() {
-    if (!this.ctx) this.init();
+  private ensure(): boolean {
+    if (!this.initialized) return false;
     if (this.ctx?.state === 'suspended') this.ctx.resume();
+    return true;
   }
 
   // ========================
@@ -73,23 +92,22 @@ export class SoundManager {
     noiseSource.start();
 
     // Slow LFO for wind variation
-    this.windLfo = this.ctx.createOscillator();
-    this.windLfo.type = 'sine';
-    this.windLfo.frequency.value = 0.15;
+    const windLfo = this.ctx.createOscillator();
+    windLfo.type = 'sine';
+    windLfo.frequency.value = 0.15;
     const lfoGain = this.ctx.createGain();
     lfoGain.gain.value = 0.04;
-    this.windLfo.connect(lfoGain);
+    windLfo.connect(lfoGain);
     lfoGain.connect(this.windGain.gain);
-    this.windLfo.start();
+    windLfo.start();
   }
 
-  /** Update wind volume based on wind speed */
+  /** Update wind volume based on wind speed — safe for NaN/0 */
   setWindIntensity(speed: number) {
-    if (!this.windGain) return;
-    const target = 0.04 + speed * 0.08;
-    this.windGain.gain.linearRampToValueAtTime(
-      target, (this.ctx?.currentTime ?? 0) + 0.3
-    );
+    if (!this.windGain || !this.ctx || !this.initialized) return;
+    if (!Number.isFinite(speed)) return;
+    const target = 0.04 + Math.max(0, speed) * 0.08;
+    safeRamp(this.windGain.gain, target, this.ctx.currentTime + 0.3);
   }
 
   // ========================
@@ -119,11 +137,12 @@ export class SoundManager {
 
   /** Set string tension sound (0 = silent, 1 = max) */
   setTension(amount: number) {
-    if (!this.tensionGain || !this.tensionOsc || !this.ctx) return;
-    const vol = amount * 0.06;
-    const freq = 150 + amount * 120;
-    this.tensionGain.gain.linearRampToValueAtTime(vol, this.ctx.currentTime + 0.05);
-    this.tensionOsc.frequency.linearRampToValueAtTime(freq, this.ctx.currentTime + 0.05);
+    if (!this.tensionGain || !this.tensionOsc || !this.ctx || !this.initialized) return;
+    if (!Number.isFinite(amount)) return;
+    const vol = Math.max(0, amount) * 0.06;
+    const freq = 150 + Math.max(0, amount) * 120;
+    safeRamp(this.tensionGain.gain, vol, this.ctx.currentTime + 0.05);
+    safeRamp(this.tensionOsc.frequency, freq, this.ctx.currentTime + 0.05);
   }
 
   // ========================
@@ -132,7 +151,7 @@ export class SoundManager {
 
   /** Star collected — bright ascending chime */
   playStarCollect() {
-    this.ensure();
+    if (!this.ensure()) return;
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
@@ -141,25 +160,27 @@ export class SoundManager {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(800 + i * 400, now + i * 0.08);
-      osc.frequency.exponentialRampToValueAtTime(1400 + i * 400, now + i * 0.08 + 0.12);
-      gain.gain.setValueAtTime(0.12, now + i * 0.08);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.25);
+      const t = now + i * 0.08;
+      safeSet(osc.frequency, 800 + i * 400, t);
+      safeExpRamp(osc.frequency, 1400 + i * 400, t + 0.12);
+      safeSet(gain.gain, 0.12, t);
+      safeExpRamp(gain.gain, 0.001, t + 0.25);
       osc.connect(gain);
       gain.connect(this.masterGain);
-      osc.start(now + i * 0.08);
-      osc.stop(now + i * 0.08 + 0.3);
+      osc.start(t);
+      osc.stop(t + 0.3);
     }
   }
 
   /** Pench sparking — crackling metallic friction */
   playPenchSpark() {
-    this.ensure();
+    if (!this.ensure()) return;
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
+
     // Short noise burst (string grinding)
-    const bufLen = this.ctx.sampleRate * 0.08;
+    const bufLen = Math.floor(this.ctx.sampleRate * 0.08);
     const buf = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
     const d = buf.getChannelData(0);
     for (let i = 0; i < bufLen; i++) {
@@ -183,12 +204,12 @@ export class SoundManager {
 
   /** Kite cut — sharp snap + falling whoosh */
   playKiteCut() {
-    this.ensure();
+    if (!this.ensure()) return;
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
     // SNAP: short bright noise burst
-    const snapLen = this.ctx.sampleRate * 0.06;
+    const snapLen = Math.floor(this.ctx.sampleRate * 0.06);
     const snapBuf = this.ctx.createBuffer(1, snapLen, this.ctx.sampleRate);
     const snapData = snapBuf.getChannelData(0);
     for (let i = 0; i < snapLen; i++) {
@@ -205,11 +226,11 @@ export class SoundManager {
     // WHOOSH: descending tone
     const osc = this.ctx.createOscillator();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(600, now + 0.05);
-    osc.frequency.exponentialRampToValueAtTime(80, now + 0.6);
+    safeSet(osc.frequency, 600, now + 0.05);
+    safeExpRamp(osc.frequency, 80, now + 0.6);
     const whooshGain = this.ctx.createGain();
-    whooshGain.gain.setValueAtTime(0.08, now + 0.05);
-    whooshGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    safeSet(whooshGain.gain, 0.08, now + 0.05);
+    safeExpRamp(whooshGain.gain, 0.001, now + 0.6);
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 800;
@@ -222,12 +243,12 @@ export class SoundManager {
 
   /** Crowd reaction — noise burst shaped like "ohhh!" */
   playCrowdCheer() {
-    this.ensure();
+    if (!this.ensure()) return;
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
     const duration = 1.2;
-    const bufLen = this.ctx.sampleRate * duration;
+    const bufLen = Math.floor(this.ctx.sampleRate * duration);
     const buf = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
     const data = buf.getChannelData(0);
 
@@ -261,7 +282,7 @@ export class SoundManager {
 
   /** Countdown beep */
   playCountdownBeep(final = false) {
-    this.ensure();
+    if (!this.ensure()) return;
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
 
@@ -269,12 +290,32 @@ export class SoundManager {
     osc.type = 'sine';
     osc.frequency.value = final ? 880 : 440;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + (final ? 0.4 : 0.15));
+    safeSet(gain.gain, 0.15, now);
+    safeExpRamp(gain.gain, 0.001, now + (final ? 0.4 : 0.15));
     osc.connect(gain);
     gain.connect(this.masterGain);
     osc.start(now);
     osc.stop(now + (final ? 0.5 : 0.2));
+  }
+
+  /** Player joined whoosh */
+  playPlayerJoined() {
+    if (!this.ensure()) return;
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Quick bright ascending tone
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    safeSet(osc.frequency, 400, now);
+    safeExpRamp(osc.frequency, 900, now + 0.15);
+    const gain = this.ctx.createGain();
+    safeSet(gain.gain, 0.1, now);
+    safeExpRamp(gain.gain, 0.001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.35);
   }
 
   // ========================
@@ -296,5 +337,6 @@ export class SoundManager {
   destroy() {
     this.ctx?.close();
     this.ctx = null;
+    this.initialized = false;
   }
 }

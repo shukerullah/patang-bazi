@@ -108,6 +108,14 @@ export class NetworkManager {
       this.emit('gameOver', msg);
     });
 
+    this._room.onMessage(MessageType.PLAYER_JOINED, (msg: any) => {
+      this.emit('playerJoined', msg);
+    });
+
+    this._room.onMessage(MessageType.PLAYER_LEFT, (msg: any) => {
+      this.emit('playerLeft', msg);
+    });
+
     this._room.onError((code, message) => {
       console.error(`Room error [${code}]: ${message}`);
       this.emit('error', new Error(`[${code}] ${message}`));

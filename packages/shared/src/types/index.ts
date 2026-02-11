@@ -148,6 +148,19 @@ export interface GameOverMessage {
   }>;
 }
 
+export interface PlayerJoinedMessage {
+  playerId: string;
+  name: string;
+  colorIndex: number;
+  /** True if player joined while game was already running */
+  hotJoin: boolean;
+}
+
+export interface PlayerLeftMessage {
+  playerId: string;
+  name: string;
+}
+
 // --- Join Options ---
 export interface RoomJoinOptions {
   name: string;
