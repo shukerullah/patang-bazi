@@ -11,7 +11,7 @@ async function bootstrap() {
   const app = new Application();
 
   await app.init({
-    background: '#1a0a2e',
+    background: 0x000000,         // Black fallback (sky covers it)
     resizeTo: window,
     antialias: true,
     autoDensity: true,

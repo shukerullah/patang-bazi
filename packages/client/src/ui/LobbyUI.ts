@@ -82,6 +82,22 @@ export class LobbyUI {
           background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.2);
           border-radius: 4px; padding: 1px 7px; color: #ffd666; font-weight: 600;
         }
+        /* Mobile responsive */
+        @media (max-width: 600px) {
+          .lobby-kite { font-size: 48px; margin-bottom: 4px; }
+          .lobby-title { font-size: 32px; }
+          .lobby-sub { font-size: 13px; margin-bottom: 20px; }
+          .lobby-form { flex-direction: column; gap: 10px; }
+          .lobby-input { width: 220px; padding: 10px 16px; font-size: 15px; }
+          .lobby-btn { padding: 10px 32px; font-size: 18px; }
+          .lobby-status { font-size: 12px; }
+          .lobby-countdown { font-size: 64px; }
+          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; }
+        }
+        @media (max-width: 360px) {
+          .lobby-title { font-size: 26px; }
+          .lobby-input { width: 180px; }
+        }
       </style>
       <div class="lobby-kite">🪁</div>
       <div class="lobby-title">PATANG BAZI</div>

@@ -1,9 +1,8 @@
 // ============================================
 // PATANG BAZI — Screen Shake
-// Shakes a container for impact feel
+// Returns offset for camera to apply
+// (no longer directly sets container position)
 // ============================================
-
-import { Container } from 'pixi.js';
 
 interface ShakeInstance {
   intensity: number;
@@ -12,14 +11,11 @@ interface ShakeInstance {
 }
 
 export class ScreenShake {
-  private target: Container;
-  private baseX = 0;
-  private baseY = 0;
   private shakes: ShakeInstance[] = [];
 
-  constructor(target: Container) {
-    this.target = target;
-  }
+  // Current offset (read by camera/game each frame)
+  offsetX = 0;
+  offsetY = 0;
 
   /** Trigger a shake */
   shake(intensity = 8, duration = 0.3) {
@@ -27,30 +23,18 @@ export class ScreenShake {
   }
 
   /** Small shake */
-  light() {
-    this.shake(4, 0.15);
-  }
+  light() { this.shake(4, 0.15); }
 
   /** Medium shake */
-  medium() {
-    this.shake(10, 0.3);
-  }
+  medium() { this.shake(10, 0.3); }
 
   /** Big shake for kite cut */
-  heavy() {
-    this.shake(18, 0.45);
-  }
+  heavy() { this.shake(18, 0.45); }
 
-  /** Call before applying world position */
-  saveBase(x: number, y: number) {
-    this.baseX = x;
-    this.baseY = y;
-  }
-
-  /** Call every frame to apply shake offset */
+  /** Call every frame — updates offsetX/offsetY */
   update(dt: number) {
-    let offsetX = 0;
-    let offsetY = 0;
+    this.offsetX = 0;
+    this.offsetY = 0;
 
     for (let i = this.shakes.length - 1; i >= 0; i--) {
       const s = this.shakes[i];
@@ -64,15 +48,9 @@ export class ScreenShake {
       // Decay
       const remaining = 1 - s.elapsed / s.duration;
       const power = s.intensity * remaining;
-
-      offsetX += (Math.random() * 2 - 1) * power;
-      offsetY += (Math.random() * 2 - 1) * power;
+      this.offsetX += (Math.random() * 2 - 1) * power;
+      this.offsetY += (Math.random() * 2 - 1) * power;
     }
-
-    this.target.position.set(
-      this.baseX + offsetX,
-      this.baseY + offsetY,
-    );
   }
 
   get isShaking(): boolean {

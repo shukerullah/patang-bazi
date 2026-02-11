@@ -1,9 +1,12 @@
 // ============================================
-// PATANG BAZI — Sky Renderer
-// Beautiful sunset sky with PixiJS Graphics
+// PATANG BAZI — Sky Renderer (Viewport-Aware)
+// Always fills the screen. Gradient shifts with
+// camera position for parallax feel.
 // ============================================
 
 import { Container, Graphics } from 'pixi.js';
+import { WORLD_HEIGHT } from '@patang/shared';
+import type { Camera } from './Camera';
 
 /** Color stop for sky gradient */
 interface SkyStop {
@@ -27,17 +30,15 @@ export class SkyRenderer {
   private sunGraphics: Graphics;
   private starsGraphics: Graphics;
 
-  private worldW: number;
-  private worldH: number;
+  private screenW = 1920;
+  private screenH = 1080;
 
   // Pre-calculated star positions (deterministic)
   private bgStars: Array<{ x: number; y: number; seed: number }> = [];
 
-  constructor(parent: Container, worldW: number, worldH: number) {
+  constructor(parent: Container) {
     this.container = new Container();
     parent.addChild(this.container);
-    this.worldW = worldW;
-    this.worldH = worldH;
 
     // Sky gradient (drawn once, updated rarely)
     this.skyGraphics = new Graphics();
@@ -51,49 +52,74 @@ export class SkyRenderer {
     this.starsGraphics = new Graphics();
     this.container.addChild(this.starsGraphics);
 
-    // Generate deterministic star positions
-    const seed = 12345;
-    for (let i = 0; i < 60; i++) {
+    // Generate stars across a large area (will be positioned relative to camera)
+    for (let i = 0; i < 80; i++) {
+      const seed = 12345;
       this.bgStars.push({
-        x: (seed * (i + 1) * 7919) % worldW,
-        y: (seed * (i + 1) * 104729) % (worldH * 0.4),
+        x: ((seed * (i + 1) * 7919) % 3000) - 500,
+        y: ((seed * (i + 1) * 104729) % 600),
         seed: i * 1.5,
       });
     }
-
-    this.drawSky();
-    this.drawSun();
   }
 
-  private drawSky() {
+  /** Call on resize */
+  setScreenSize(w: number, h: number) {
+    this.screenW = w;
+    this.screenH = h;
+  }
+
+  /** Redraw sky + sun based on camera position */
+  update(gameTime: number, camera: Camera) {
+    this.drawSky(camera);
+    this.drawSun(camera);
+    this.drawStars(gameTime, camera);
+  }
+
+  private drawSky(camera: Camera) {
     const g = this.skyGraphics;
     g.clear();
 
-    // PixiJS v8: draw sky as vertical stripes to simulate gradient
+    // Visible world Y range
+    const viewTop = camera.y - camera.viewH / 2;
+    const viewBottom = camera.y + camera.viewH / 2;
+
+    // Draw full-screen gradient strips
     const stripH = 4;
-    const totalStrips = Math.ceil(this.worldH / stripH);
+    const totalStrips = Math.ceil(this.screenH / stripH);
 
     for (let i = 0; i < totalStrips; i++) {
-      const t = i / totalStrips;
+      const screenY = i * stripH;
+      // Map screen Y to world Y, then to gradient t
+      const worldY = viewTop + (screenY / this.screenH) * (viewBottom - viewTop);
+      const t = Math.max(0, Math.min(1, worldY / WORLD_HEIGHT));
       const color = this.sampleGradient(t);
-      g.rect(0, i * stripH, this.worldW, stripH + 1);
+
+      g.rect(0, screenY, this.screenW, stripH + 1);
       g.fill(color);
     }
   }
 
-  private drawSun() {
+  private drawSun(camera: Camera) {
     const g = this.sunGraphics;
     g.clear();
 
-    const sunX = this.worldW * 0.7;
-    const sunY = this.worldH * 0.82;
+    // Sun position in world coords
+    const sunWorldX = 1920 * 0.7;
+    const sunWorldY = WORLD_HEIGHT * 0.82;
 
-    // Layered circles for glow effect
+    // Convert to screen coords
+    const sunX = camera.worldToScreenX(sunWorldX);
+    const sunY = camera.worldToScreenY(sunWorldY);
+
+    // Scale layers based on camera scale
+    const baseSize = WORLD_HEIGHT * camera.scale;
+
     const layers = [
-      { radius: this.worldH * 0.08, alpha: 0.35, color: 0xffdc78 },
-      { radius: this.worldH * 0.15, alpha: 0.15, color: 0xffb450 },
-      { radius: this.worldH * 0.25, alpha: 0.06, color: 0xff8040 },
-      { radius: this.worldH * 0.4, alpha: 0.02, color: 0xff6432 },
+      { radius: baseSize * 0.08, alpha: 0.35, color: 0xffdc78 },
+      { radius: baseSize * 0.15, alpha: 0.15, color: 0xffb450 },
+      { radius: baseSize * 0.25, alpha: 0.06, color: 0xff8040 },
+      { radius: baseSize * 0.4, alpha: 0.02, color: 0xff6432 },
     ];
 
     for (const layer of layers) {
@@ -102,17 +128,25 @@ export class SkyRenderer {
     }
   }
 
-  update(gameTime: number) {
-    // Update twinkling background stars
+  private drawStars(gameTime: number, camera: Camera) {
     const g = this.starsGraphics;
     g.clear();
 
+    // Only draw stars in the dark part of sky (top 40%)
     for (const star of this.bgStars) {
+      // Stars are in world-relative coords (scattered in upper portion)
+      const screenX = camera.worldToScreenX(star.x);
+      const screenY = camera.worldToScreenY(star.y);
+
+      // Skip if off screen
+      if (screenX < -10 || screenX > this.screenW + 10) continue;
+      if (screenY < -10 || screenY > this.screenH * 0.5) continue;
+
       const twinkle = Math.sin(gameTime * 2 + star.seed) * 0.5 + 0.5;
       const alpha = 0.15 + twinkle * 0.4;
       const radius = 0.8 + twinkle * 1;
 
-      g.circle(star.x, star.y, radius);
+      g.circle(screenX, screenY, radius);
       g.fill({ color: 0xffffff, alpha });
     }
   }
@@ -124,29 +158,20 @@ export class SkyRenderer {
     // Find surrounding stops
     for (let i = 0; i < palette.length - 1; i++) {
       if (t >= palette[i].offset && t <= palette[i + 1].offset) {
-        const localT =
-          (t - palette[i].offset) / (palette[i + 1].offset - palette[i].offset);
+        const localT = (t - palette[i].offset) / (palette[i + 1].offset - palette[i].offset);
         return this.lerpColor(palette[i].color, palette[i + 1].color, localT);
       }
     }
-
     return palette[palette.length - 1].color;
   }
 
   /** Lerp two hex colors */
   private lerpColor(a: number, b: number, t: number): number {
-    const ar = (a >> 16) & 0xff;
-    const ag = (a >> 8) & 0xff;
-    const ab = a & 0xff;
-
-    const br = (b >> 16) & 0xff;
-    const bg = (b >> 8) & 0xff;
-    const bb = b & 0xff;
-
+    const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+    const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
     const r = Math.round(ar + (br - ar) * t);
-    const g = Math.round(ag + (bg - ag) * t);
+    const gv = Math.round(ag + (bg - ag) * t);
     const bl = Math.round(ab + (bb - ab) * t);
-
-    return (r << 16) | (g << 8) | bl;
+    return (r << 16) | (gv << 8) | bl;
   }
 }

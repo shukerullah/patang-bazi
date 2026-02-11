@@ -1,12 +1,13 @@
 // ============================================
 // PATANG BAZI — Game Core (Multiplayer)
-// Hot-join, toast notifications, input throttle,
-// progressive pench, sound, screen shake
+// Camera follow, responsive fill-scale,
+// hot-join, toasts, pench, sound, shake
 // ============================================
 
 import { Application, Container } from 'pixi.js';
 import { InputManager } from '../systems/InputManager';
 import { NetworkManager } from '../network/NetworkManager';
+import { Camera } from '../systems/Camera';
 import { SkyRenderer } from '../systems/SkyRenderer';
 import { GroundRenderer } from '../systems/GroundRenderer';
 import { CloudRenderer } from '../systems/CloudRenderer';
@@ -76,10 +77,7 @@ class ToastManager {
 
     if (colorDot) {
       const dot = document.createElement('span');
-      dot.style.cssText = `
-        width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-        background: ${colorDot};
-      `;
+      dot.style.cssText = `width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: ${colorDot};`;
       el.appendChild(dot);
     }
 
@@ -88,8 +86,6 @@ class ToastManager {
     el.appendChild(span);
 
     this.container.appendChild(el);
-
-    // Animate in
     requestAnimationFrame(() => {
       el.style.opacity = '1';
       el.style.transform = 'translateX(0)';
@@ -111,7 +107,6 @@ class ToastManager {
     const idx = this.toasts.indexOf(toast);
     if (idx === -1) return;
     this.toasts.splice(idx, 1);
-
     toast.el.style.opacity = '0';
     toast.el.style.transform = 'translateX(-20px)';
     setTimeout(() => toast.el.remove(), 300);
@@ -126,15 +121,17 @@ export class Game {
   private app: Application;
   private input: InputManager;
   private network: NetworkManager;
+  private camera: Camera;
 
-  // Scene
-  private worldContainer!: Container;
-  private skyLayer!: Container;
+  // Scene layers
+  private bgContainer!: Container;    // Screen space (sky gradient + sun)
+  private worldContainer!: Container; // Camera-controlled (world objects)
   private cloudLayer!: Container;
+  private groundLayer!: Container;
   private gameLayer!: Container;
   private effectLayer!: Container;
 
-  // Background
+  // Renderers
   private skyRenderer!: SkyRenderer;
   private cloudRenderer!: CloudRenderer;
   private birdRenderer!: BirdRenderer;
@@ -150,6 +147,11 @@ export class Game {
   private playerViews = new Map<string, PlayerView>();
   private localPlayerId: string | null = null;
   public playerName = 'Player';
+
+  // Current local kite position (for camera)
+  private localKiteX = WORLD_WIDTH / 2;
+  private localKiteY = WORLD_HEIGHT * 0.5;
+  private cameraInitialized = false;
 
   // Timing
   private gameTime = 0;
@@ -179,11 +181,13 @@ export class Game {
     this.app = app;
     this.input = input;
     this.network = network;
+    this.camera = new Camera();
   }
 
   async init() {
     this.sound = new SoundManager();
     this.toasts = new ToastManager();
+    this.screenShake = new ScreenShake();
     this.setupSceneGraph();
     this.setupRenderers();
     this.setupHUD();
@@ -192,33 +196,52 @@ export class Game {
   }
 
   // ========================
-  // SETUP
+  // SCENE GRAPH
   // ========================
 
   private setupSceneGraph() {
+    // BG container: screen-space (never scaled/moved by camera)
+    // Sky gradient + sun + bg stars render here in screen pixels
+    this.bgContainer = new Container();
+    this.app.stage.addChild(this.bgContainer);
+
+    // World container: camera-controlled
+    // Everything in world coordinates renders here
     this.worldContainer = new Container();
     this.app.stage.addChild(this.worldContainer);
 
-    this.skyLayer = new Container();
     this.cloudLayer = new Container();
+    this.groundLayer = new Container();
     this.gameLayer = new Container();
     this.effectLayer = new Container();
 
-    this.worldContainer.addChild(this.skyLayer, this.cloudLayer, this.gameLayer, this.effectLayer);
+    this.worldContainer.addChild(
+      this.cloudLayer,
+      this.groundLayer,
+      this.gameLayer,
+      this.effectLayer,
+    );
 
-    this.screenShake = new ScreenShake(this.worldContainer);
     this.onResize(window.innerWidth, window.innerHeight);
   }
 
   private setupRenderers() {
-    this.skyRenderer = new SkyRenderer(this.skyLayer, WORLD_WIDTH, WORLD_HEIGHT);
+    // Sky renders into bgContainer (screen space)
+    this.skyRenderer = new SkyRenderer(this.bgContainer);
+    // Ground in world space
+    new GroundRenderer(this.groundLayer);
+    // Clouds + birds in world space
     this.cloudRenderer = new CloudRenderer(this.cloudLayer);
     this.birdRenderer = new BirdRenderer(this.cloudLayer);
-    new GroundRenderer(this.skyLayer);
+    // Game objects
     this.starRenderer = new StarRenderer(this.gameLayer);
     this.penchRenderer = new PenchRenderer(this.effectLayer);
     this.particleSystem = new ParticleSystem(this.effectLayer);
   }
+
+  // ========================
+  // RESPONSIVE HUD
+  // ========================
 
   private setupHUD() {
     const hud = document.createElement('div');
@@ -227,75 +250,110 @@ export class Game {
       <style>
         #hud {
           position: fixed; top: 0; left: 0; right: 0;
-          padding: 16px 24px;
+          padding: 12px 16px;
           display: flex; justify-content: space-between; align-items: flex-start;
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
         }
-        .hud-left { display: flex; flex-direction: column; gap: 6px; }
+        .hud-left { display: flex; flex-direction: column; gap: 4px; max-width: 40%; }
         .game-title {
-          font-family: 'Baloo 2', cursive; font-size: 24px; font-weight: 800; color: #fff;
+          font-family: 'Baloo 2', cursive; font-size: 22px; font-weight: 800; color: #fff;
           text-shadow: 0 2px 20px rgba(255,150,50,0.4); line-height: 1;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .hud-phase { font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 500; }
-        .stats { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+        .hud-phase {
+          font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 500;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .stats {
+          display: flex; gap: 6px; flex-wrap: wrap;
+          justify-content: flex-end; align-items: center;
+        }
         .stat-pill {
           background: rgba(0,0,0,0.35); backdrop-filter: blur(12px);
           border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
-          padding: 4px 12px; font-size: 12px; font-weight: 500;
-          color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 5px;
+          padding: 3px 10px; font-size: 11px; font-weight: 500;
+          color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 4px;
+          white-space: nowrap;
         }
-        .stat-pill .val { color: #ffd666; font-weight: 700; font-size: 13px; }
+        .stat-pill .val { color: #ffd666; font-weight: 700; font-size: 12px; }
         .mute-btn {
           background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 50%; width: 32px; height: 32px;
-          font-size: 16px; cursor: pointer; pointer-events: auto;
+          border-radius: 50%; width: 30px; height: 30px;
+          font-size: 14px; cursor: pointer; pointer-events: auto;
           display: flex; align-items: center; justify-content: center;
           color: rgba(255,255,255,0.7); transition: background 0.2s;
         }
         .mute-btn:hover { background: rgba(255,255,255,0.1); }
+
+        /* Score popup */
         #score-popup {
           position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
           z-index: 20; pointer-events: none;
-          font-family: 'Baloo 2', cursive; font-size: 48px; font-weight: 800;
+          font-family: 'Baloo 2', cursive; font-size: 42px; font-weight: 800;
           color: #ffd666; text-shadow: 0 4px 30px rgba(255,180,50,0.6);
           opacity: 0; transition: opacity 0.3s, transform 0.3s;
         }
         #score-popup.show { opacity: 1; transform: translate(-50%, -60%); }
         #score-popup.cut { color: #ff4444; text-shadow: 0 4px 30px rgba(255,50,50,0.6); }
+
+        /* Scoreboard */
         .scoreboard {
-          position: fixed; top: 50px; right: 16px; z-index: 10; pointer-events: none;
-          display: flex; flex-direction: column; gap: 4px;
+          position: fixed; top: 48px; right: 12px; z-index: 10; pointer-events: none;
+          display: flex; flex-direction: column; gap: 3px;
         }
         .sb-row {
           background: rgba(0,0,0,0.3); backdrop-filter: blur(8px);
-          border-radius: 8px; padding: 4px 12px; font-size: 12px;
-          color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 8px;
+          border-radius: 8px; padding: 3px 10px; font-size: 11px;
+          color: rgba(255,255,255,0.8); display: flex; align-items: center; gap: 6px;
           border: 1px solid rgba(255,255,255,0.06);
           font-family: 'Poppins', sans-serif;
         }
         .sb-row.local { border-color: rgba(255,214,102,0.3); }
         .sb-row.dead { opacity: 0.4; }
-        .sb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .sb-name { flex: 1; }
+        .sb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .sb-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
         .sb-score { color: #ffd666; font-weight: 700; }
+
+        /* Controls bar */
         #controls-bar {
           position: fixed; bottom: 0; left: 0; right: 0;
-          padding: 12px 24px; display: flex; justify-content: center;
+          padding: 10px 16px; display: flex; justify-content: center;
           pointer-events: none; z-index: 10;
         }
         .controls-inner {
           background: rgba(0,0,0,0.25); backdrop-filter: blur(12px);
           border: 1px solid rgba(255,255,255,0.06); border-radius: 14px;
-          padding: 8px 18px; display: flex; gap: 16px; font-size: 12px;
+          padding: 6px 16px; display: flex; gap: 14px; font-size: 11px;
           color: rgba(255,255,255,0.45); font-weight: 500;
           font-family: 'Poppins', sans-serif;
         }
         .controls-inner kbd {
           background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.25);
-          border-radius: 4px; padding: 1px 6px; color: #ffd666; font-weight: 700; font-size: 11px;
+          border-radius: 4px; padding: 1px 5px; color: #ffd666; font-weight: 700; font-size: 10px;
         }
-        @media (max-width: 768px) { .controls-inner { display: none; } }
+
+        /* ====== MOBILE ====== */
+        @media (max-width: 600px) {
+          #hud { padding: 8px 10px; }
+          .game-title { font-size: 16px; }
+          .hud-phase { font-size: 9px; }
+          .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
+          .stat-pill .val { font-size: 10px; }
+          .mute-btn { width: 26px; height: 26px; font-size: 12px; }
+          .scoreboard { top: 40px; right: 8px; }
+          .sb-row { padding: 2px 8px; font-size: 10px; }
+          .sb-name { max-width: 60px; }
+          #score-popup { font-size: 32px; }
+          .controls-inner { display: none; }
+          #toast-container { top: 42px; left: 8px; }
+        }
+
+        @media (max-width: 400px) {
+          .game-title { font-size: 14px; }
+          .stat-pill { padding: 2px 6px; font-size: 9px; border-radius: 14px; }
+          .stats { gap: 4px; }
+        }
       </style>
       <div class="hud-left">
         <div class="game-title">🪁 PATANG BAZI</div>
@@ -357,7 +415,6 @@ export class Game {
   private showLobby() {
     this.lobbyUI = new LobbyUI((name) => {
       this.playerName = name;
-      // Init sound on first user interaction
       this.sound.init();
       this.connectToServer(name);
     });
@@ -388,7 +445,6 @@ export class Game {
     const room = this.network.room;
     if (!room) return;
 
-    // Players join/leave via schema (creates/destroys views)
     room.state.players.onAdd((player: any, sessionId: string) => {
       console.log(`👤 Player added: ${player.name} (${sessionId})`);
       this.createPlayerView(sessionId, player);
@@ -401,27 +457,19 @@ export class Game {
       this.updateLobbyPlayers();
     });
 
-    // Phase changes
     room.state.listen('phase', (phase: string) => {
       console.log(`🎮 Phase: ${phase}`);
-      if (phase === 'countdown') {
-        this.onCountdown();
-      } else if (phase === 'playing') {
-        this.onGameStart();
-      } else if (phase === 'finished') {
-        this.onGameEnd();
-      }
+      if (phase === 'countdown') this.onCountdown();
+      else if (phase === 'playing') this.onGameStart();
+      else if (phase === 'finished') this.onGameEnd();
     });
 
-    // Countdown ticks
     room.state.listen('countdown', (n: number) => {
       if (n > 0 && this.network.state?.phase === 'countdown') {
         this.lobbyUI.showCountdown(n);
         this.sound.playCountdownBeep(false);
       }
     });
-
-    // --- Game event messages ---
 
     // Star collected
     this.network.on('starCollected', (msg: any) => {
@@ -434,29 +482,26 @@ export class Game {
       }
     });
 
-    // Pench start
+    // Pench
     this.network.on('penchStart', (msg: any) => {
       this.penchRenderer.onPenchStart(msg.key, msg.playerAId, msg.playerBId, msg.position);
     });
 
-    // Pench update (with sparks)
     this.network.on('penchUpdate', (msg: any) => {
       this.penchRenderer.onPenchUpdate(msg.key, msg.progress, msg.position);
       if (msg.spark) {
         this.sound.playPenchSpark();
-        // Light shake during pench if local player involved
         if (msg.progress > 0.5 && this.isLocalInvolved(msg.key)) {
           this.screenShake.light();
         }
       }
     });
 
-    // Pench end
     this.network.on('penchEnd', (msg: any) => {
       if (msg.key) this.penchRenderer.onPenchEnd(msg.key);
     });
 
-    // Kite cut!
+    // Kite cut
     this.network.on('kiteCut', (msg: any) => {
       if (msg.position) {
         this.penchRenderer.cutBurst(msg.position);
@@ -473,9 +518,8 @@ export class Game {
       }
     });
 
-    // Player joined notification (toast)
+    // Player join/leave toasts
     this.network.on('playerJoined', (msg: any) => {
-      // Don't show toast for self
       if (msg.playerId === this.localPlayerId) return;
       const color = PLAYER_COLORS[msg.colorIndex % PLAYER_COLORS.length];
       const action = msg.hotJoin ? 'joined the battle!' : 'joined the room';
@@ -483,13 +527,11 @@ export class Game {
       this.sound.playPlayerJoined();
     });
 
-    // Player left notification
     this.network.on('playerLeft', (msg: any) => {
       if (msg.playerId === this.localPlayerId) return;
       this.toasts.show(`${msg.name} left`, undefined, 2500);
     });
 
-    // Disconnect
     this.network.on('disconnected', () => {
       this.lobbyUI.show();
       this.lobbyUI.setStatus('Disconnected from server', true);
@@ -497,7 +539,6 @@ export class Game {
     });
   }
 
-  /** Check if local player is involved in a pench by key */
   private isLocalInvolved(key: string): boolean {
     return !!this.localPlayerId && key.includes(this.localPlayerId);
   }
@@ -523,10 +564,7 @@ export class Game {
 
   private updateLobbyPlayers() {
     const state = this.network.state;
-    if (!state) return;
-
-    // Only update lobby if it's visible (waiting/countdown phase)
-    if (state.phase === 'playing') return;
+    if (!state || state.phase === 'playing') return;
 
     const players: Array<{ name: string; color: string; isLocal: boolean; ready: boolean }> = [];
     state.players.forEach((p: any, id: string) => {
@@ -550,16 +588,14 @@ export class Game {
   // GAME PHASE
   // ========================
 
-  private onCountdown() {
-    // Only show countdown overlay if lobby is visible
-    // (won't trigger for hot-join players since they skip lobby)
-  }
+  private onCountdown() { /* countdown overlay handled by lobby listener */ }
 
   private onGameStart() {
     this.lobbyUI.hide();
     this.gameTime = 0;
     this.inputSeq = 0;
     this.inputSendAccum = 0;
+    this.cameraInitialized = false;
     this.sound.playCountdownBeep(true);
   }
 
@@ -588,8 +624,6 @@ export class Game {
     this.app.ticker.add((ticker) => {
       const dt = ticker.deltaMS / 1000;
       this.gameTime += dt;
-
-      // Wrap tick in try-catch so one error doesn't kill rendering
       try {
         this.tick(dt);
       } catch (e) {
@@ -602,7 +636,7 @@ export class Game {
     const state = this.network.state;
     const isPlaying = state?.phase === 'playing';
 
-    // Wind (from server or safe default)
+    // Wind
     const wind: WindState = state?.wind
       ? {
         speed: Number.isFinite(state.wind.speed) ? state.wind.speed : 1,
@@ -611,28 +645,58 @@ export class Game {
       }
       : { speed: 1, direction: 1, changeTimer: 5 };
 
-    // --- Background (always renders) ---
-    this.skyRenderer.update(this.gameTime);
+    // --- Camera: follow local kite or default center ---
+    if (isPlaying && state) {
+      const localPlayer = state.players.get(this.localPlayerId);
+      if (localPlayer && localPlayer.kite.alive) {
+        this.localKiteX = localPlayer.kite.position.x;
+        this.localKiteY = localPlayer.kite.position.y;
+      }
+
+      if (!this.cameraInitialized) {
+        this.camera.snapTo(this.localKiteX, this.localKiteY);
+        this.cameraInitialized = true;
+      } else {
+        this.camera.follow(this.localKiteX, this.localKiteY, dt);
+      }
+    } else {
+      // Lobby: gentle drift at world center
+      const idleX = WORLD_WIDTH / 2 + Math.sin(this.gameTime * 0.2) * 50;
+      const idleY = WORLD_HEIGHT * 0.45 + Math.sin(this.gameTime * 0.15) * 20;
+      this.camera.follow(idleX, idleY, dt);
+    }
+
+    // --- Screen shake ---
+    this.screenShake.update(dt);
+
+    // --- Apply camera to world container ---
+    const cam = this.camera.getWorldTranslation();
+    this.worldContainer.scale.set(this.camera.scale);
+    this.worldContainer.position.set(
+      cam.x + this.screenShake.offsetX,
+      cam.y + this.screenShake.offsetY,
+    );
+
+    // --- Background (screen space, always) ---
+    this.skyRenderer.update(this.gameTime, this.camera);
+
+    // --- World-space background ---
     this.cloudRenderer.update(wind);
     this.birdRenderer.update(this.gameTime, dt);
 
-    // --- Sound: wind ambience ---
+    // --- Sound: wind ---
     this.sound.setWindIntensity(wind.speed);
 
     if (!isPlaying || !state) {
       this.particleSystem.update(dt);
       this.penchRenderer.update(dt);
-      this.screenShake.update(dt);
       return;
     }
 
-    // --- Throttled input sending ---
+    // --- Throttled input ---
     const currentPull = this.input.isPulling();
     const currentSteer = this.input.getSteer();
-
     this.inputSendAccum += dt;
-
-    // Send input at tick rate OR immediately when input changes
     const inputChanged = currentPull !== this.lastSentPull || currentSteer !== this.lastSentSteer;
 
     if (this.inputSendAccum >= this.INPUT_SEND_INTERVAL || inputChanged) {
@@ -667,13 +731,11 @@ export class Game {
     this.starRenderer.syncStars(starList);
     this.starRenderer.update(this.gameTime);
 
-    // --- Sync pench state from server schema ---
+    // --- Pench schema sync ---
     if (state.penches) {
       state.penches.forEach((p: any) => {
         if (!p.active) return;
-        // Create or update pench renderer
         this.penchRenderer.onPenchUpdate(p.id, p.progress, { x: p.position.x, y: p.position.y });
-        // Start if new (idempotent)
         this.penchRenderer.onPenchStart(p.id, p.playerAId, p.playerBId, { x: p.position.x, y: p.position.y });
       });
     }
@@ -694,7 +756,6 @@ export class Game {
       const isLocal = sessionId === this.localPlayerId;
 
       if (isLocal) {
-        // Client-side prediction for smooth local movement
         const pending = this.network.getPendingInputs(player.lastProcessedInput);
         let predicted = { ...kite };
         for (const pi of pending) {
@@ -702,6 +763,10 @@ export class Game {
           predicted = result.kite;
         }
         view.update(predicted, anchor, wind, currentPull, this.gameTime);
+
+        // Update camera target from predicted position
+        this.localKiteX = predicted.position.x;
+        this.localKiteY = predicted.position.y;
       } else {
         view.update(kite, anchor, wind, false, this.gameTime);
       }
@@ -712,7 +777,6 @@ export class Game {
     // --- Effects ---
     this.penchRenderer.update(dt);
     this.particleSystem.update(dt);
-    this.screenShake.update(dt);
 
     // --- HUD ---
     this.updateHUD(state, wind);
@@ -733,15 +797,12 @@ export class Game {
       this.hudScore.textContent = String(localPlayer.score);
     }
 
-    // Wind
     const arrow = wind.direction > 0 ? '→' : '←';
     this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
 
-    // Time
     const secs = Math.max(0, Math.ceil(state.timeRemaining));
     this.hudTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
-    // Phase
     this.hudPhase.textContent = state.phase === 'playing'
       ? `Room: ${this.network.roomId?.slice(0, 6)} · ${state.players.size} players`
       : state.phase;
@@ -782,14 +843,10 @@ export class Game {
   }
 
   onResize(screenW: number, screenH: number) {
-    const scaleX = screenW / WORLD_WIDTH;
-    const scaleY = screenH / WORLD_HEIGHT;
-    const scale = Math.min(scaleX, scaleY);
-    const baseX = (screenW - WORLD_WIDTH * scale) / 2;
-    const baseY = (screenH - WORLD_HEIGHT * scale) / 2;
+    this.camera.setViewport(screenW, screenH);
 
-    this.worldContainer.scale.set(scale);
-    this.screenShake.saveBase(baseX, baseY);
-    this.worldContainer.position.set(baseX, baseY);
+    if (this.skyRenderer) {
+      this.skyRenderer.setScreenSize(screenW, screenH);
+    }
   }
 }
