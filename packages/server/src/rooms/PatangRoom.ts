@@ -49,6 +49,12 @@ function penchKey(idA: string, idB: string): string {
   return idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`;
 }
 
+/** Sanitize player name: trim, limit length, strip dangerous chars */
+function sanitizeName(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return 'Player';
+  return raw.trim().replace(/[<>&"']/g, '').slice(0, 16) || 'Player';
+}
+
 // Server-side pench tracker
 interface PenchTracker {
   playerAId: string;
@@ -77,22 +83,23 @@ export class PatangRoom extends Room<GameRoomState> {
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // Min players to start the first game
-  private static MIN_PLAYERS_TO_START = 1; // Change to 2 for production
+  private static MIN_PLAYERS_TO_START = 2;
 
   onCreate(_options: RoomJoinOptions) {
     this.setState(new GameRoomState());
     this.maxClients = MAX_PLAYERS_PER_ROOM;
 
     this.onMessage(MessageType.INPUT, (client, input: PlayerInput) => {
-      // Clamp steer to [-1, 1] to prevent cheating
+      // Validate and clamp to prevent cheating
       input.steer = Math.max(-1, Math.min(1, input.steer || 0));
+      input.pull = !!input.pull;  // Coerce to boolean
       this.currentInputs.set(client.sessionId, input);
     });
 
     this.onMessage(MessageType.PLAYER_READY, (client, data: { name: string }) => {
       const player = this.state.players.get(client.sessionId);
       if (player) {
-        player.name = data.name || 'Player';
+        player.name = sanitizeName(data.name);
         player.ready = true;
       }
 
@@ -111,7 +118,7 @@ export class PatangRoom extends Room<GameRoomState> {
 
     const player = new PlayerSchema();
     player.id = client.sessionId;
-    player.name = options.name || 'Player';
+    player.name = sanitizeName(options.name);
     player.colorIndex = this.colorAssignment % PLAYER_COLORS.length;
     player.connected = true;
 
@@ -164,8 +171,15 @@ export class PatangRoom extends Room<GameRoomState> {
       this.state.players.delete(client.sessionId);
       this.currentInputs.delete(client.sessionId);
       this.cleanupPenchesFor(client.sessionId);
+
+      // Check if game should end (only for immediate removal)
+      const activePlayers = Array.from(this.state.players.values()).filter(p => p.connected);
+      if (activePlayers.length === 0 && this.state.phase === 'playing') {
+        this.endGame();
+      }
     } else {
       // Non-consented: mark disconnected, start removal timer
+      // (timer callback handles end-game check after removal)
       if (player) player.connected = false;
 
       const timer = setTimeout(() => {
@@ -195,11 +209,6 @@ export class PatangRoom extends Room<GameRoomState> {
     });
 
     console.log(`👤 ${playerName} left: ${client.sessionId} (consented: ${consented})`);
-
-    const activePlayers = Array.from(this.state.players.values()).filter(p => p.connected);
-    if (activePlayers.length === 0 && this.state.phase === 'playing') {
-      this.endGame();
-    }
   }
 
   onDispose() {
@@ -341,7 +350,9 @@ export class PatangRoom extends Room<GameRoomState> {
           player.score += STAR_POINTS;
           this.broadcast(MessageType.STAR_COLLECTED, { starId, playerId: player.id, newScore: player.score });
           const delay = STAR_SPAWN_DELAY_MIN + this.seededRandom() * (STAR_SPAWN_DELAY_MAX - STAR_SPAWN_DELAY_MIN);
-          setTimeout(() => this.spawnStars(1), delay);
+          setTimeout(() => {
+            if (this.state.phase === 'playing') this.spawnStars(1);
+          }, delay);
         }
       }
     });
@@ -570,7 +581,12 @@ export class PatangRoom extends Room<GameRoomState> {
 
   private spawnStars(count: number, stagger = false) {
     for (let i = 0; i < count; i++) {
-      if (this.state.stars.filter(s => s.active).length >= STAR_MAX_COUNT) break;
+      // Count active stars without allocating a filtered array
+      let activeCount = 0;
+      for (let j = 0; j < this.state.stars.length; j++) {
+        if (this.state.stars[j]?.active) activeCount++;
+      }
+      if (activeCount >= STAR_MAX_COUNT) break;
       const star = new StarSchema();
       star.id = `star_${this.state.tick}_${i}_${Math.floor(this.seededRandom() * 10000)}`;
       star.position.x = WORLD_WIDTH * 0.15 + this.seededRandom() * WORLD_WIDTH * 0.7;

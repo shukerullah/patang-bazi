@@ -13,7 +13,6 @@ export interface StarData {
   position: Vec2;
   size: number;
   active: boolean;
-  pulse: number;
 }
 
 type StarPhase = 'appearing' | 'visible' | 'disappearing';
@@ -27,6 +26,7 @@ interface StarEntry {
   glowGraphics: Graphics;
   phase: StarPhase;
   phaseTime: number;  // seconds elapsed in current phase
+  pulse: number;      // internal pulse animation (owned by renderer)
 }
 
 export class StarRenderer {
@@ -79,6 +79,7 @@ export class StarRenderer {
           glowGraphics,
           phase: 'appearing',
           phaseTime: 0,
+          pulse: Math.random() * Math.PI * 2,  // random phase offset per star
         });
       } else {
         this.stars.get(star.id)!.data = star;
@@ -116,9 +117,9 @@ export class StarRenderer {
       }
 
       // Pulse (only when visible or appearing)
-      data.pulse += 0.03;
+      entry.pulse += 0.03;
       const pulseScale = entry.phase !== 'disappearing'
-        ? Math.sin(data.pulse) * 0.15 + 1
+        ? Math.sin(entry.pulse) * 0.15 + 1
         : 1;
       const sz = data.size * pulseScale * scale;
 

@@ -74,6 +74,10 @@ export class NetworkManager {
   sendInput(input: PlayerInput) {
     if (!this._room) return;
     this.pendingInputs.push(input);
+    // Cap pending inputs to prevent memory growth during network stalls
+    if (this.pendingInputs.length > 120) {
+      this.pendingInputs = this.pendingInputs.slice(-60);
+    }
     this._room.send(MessageType.INPUT, input);
   }
 

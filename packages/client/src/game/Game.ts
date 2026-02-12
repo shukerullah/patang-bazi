@@ -35,10 +35,15 @@ import {
 } from '@patang/shared';
 
 function getServerUrl(): string {
+  // Production: set VITE_SERVER_URL env var at build time
+  // e.g., VITE_SERVER_URL=wss://patang-server.onrender.com
+  const envUrl = (import.meta as any).env?.VITE_SERVER_URL;
+  if (envUrl) return envUrl;
+
+  // Development: same hostname, server port 2567
   const host = window.location.hostname;
-  const port = 2567;
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${host}:${port}`;
+  return `${protocol}://${host}:2567`;
 }
 
 // ========================
@@ -822,7 +827,6 @@ export class Game {
           id: s.id,
           position: { x: s.position.x, y: s.position.y },
           size: s.size, active: s.active,
-          pulse: this.gameTime * 2,
         });
       });
     }
@@ -861,6 +865,11 @@ export class Game {
       const view = this.playerViews.get(sessionId);
       if (!view) return;
 
+      // Fade disconnected players (they'll be removed by server after timeout)
+      const targetAlpha = !player.connected ? 0.25
+        : sessionId === this.localPlayerId ? 1.0 : 0.85;
+      view.container.alpha += (targetAlpha - view.container.alpha) * 0.1;
+
       const kite: KiteState = {
         position: { x: player.kite.position.x, y: player.kite.position.y },
         velocity: { x: player.kite.velocity.x, y: player.kite.velocity.y },
@@ -871,7 +880,7 @@ export class Game {
       const anchor = { x: player.anchorPosition.x, y: player.anchorPosition.y };
       const isLocal = sessionId === this.localPlayerId;
 
-      if (isLocal) {
+      if (isLocal && player.connected) {
         const pending = this.network.getPendingInputs(player.lastProcessedInput);
         let predicted = { ...kite };
         for (const pi of pending) {
@@ -937,10 +946,14 @@ export class Game {
       const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
       const isLocal = id === this.localPlayerId;
       const isDead = !p.kite.alive;
+      // Escape HTML in player name (defense-in-depth, server also sanitizes)
+      const safeName = (p.name || 'Player').replace(/[<>&"']/g, (c: string) =>
+        ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] || c
+      );
       rows.push(`
         <div class="sb-row${isLocal ? ' local' : ''}${isDead ? ' dead' : ''}">
           <div class="sb-dot" style="background:${palette.primary}"></div>
-          <span class="sb-name">${p.name || 'Player'}${isDead ? ' ✂️' : ''}</span>
+          <span class="sb-name">${safeName}${isDead ? ' ✂️' : ''}</span>
           <span class="sb-score">${p.score}</span>
         </div>
       `);
@@ -956,14 +969,14 @@ export class Game {
   // UTILS
   // ========================
 
-  private scorePopupTimer = 0;
+  private scorePopupTimer: ReturnType<typeof setTimeout> | null = null;
 
   private showScorePopup(text: string, isCut = false) {
     const el = document.getElementById('score-popup')!;
     el.textContent = text;
     el.className = 'show' + (isCut ? ' cut' : '');
-    clearTimeout(this.scorePopupTimer as unknown as number);
-    this.scorePopupTimer = window.setTimeout(() => {
+    if (this.scorePopupTimer) clearTimeout(this.scorePopupTimer);
+    this.scorePopupTimer = setTimeout(() => {
       el.className = '';
     }, 1500);
   }

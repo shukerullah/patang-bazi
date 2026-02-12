@@ -42,7 +42,7 @@ export const STAR_MIN_SIZE = 12;
 export const STAR_MAX_SIZE = 22;
 export const STAR_POINTS = 10;
 export const STAR_MAX_COUNT = 6;
-export const STAR_LIFETIME_MIN = 5;            // Min seconds before despawn
+export const STAR_LIFETIME_MIN = 8;            // Min seconds before despawn
 export const STAR_LIFETIME_MAX = 15;           // Max seconds (randomized per star)
 
 // --- Multiplayer ---
@@ -56,6 +56,11 @@ export const PLAYER_COLORS = [
   { primary: '#2ecc71', secondary: '#e74c3c', name: 'Green-Red' },
   { primary: '#e67e22', secondary: '#1abc9c', name: 'Amber-Teal' },
 ] as const;
+
+// --- String Rendering ---
+export const STRING_SAG_PULL = 8;              // Catenary sag when pulling
+export const STRING_SAG_GLIDE = 25;            // Catenary sag when gliding
+export const STRING_SAG_PENCH = 20;            // Sag used for pench detection (server-side average)
 
 // --- String Fighting (Pench) ---
 export const PENCH_CROSS_DISTANCE = 35;        // How close strings must be

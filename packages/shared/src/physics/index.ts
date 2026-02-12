@@ -20,6 +20,7 @@ import {
   WIND_FORCE_MULTIPLIER,
   WIND_GUST_AMPLITUDE,
   PENCH_CROSS_DISTANCE,
+  STRING_SAG_PENCH,
   GROUND_Y,
 } from '../constants/index.js';
 
@@ -234,7 +235,7 @@ export function checkPench(
 function sampleStringPoint(kitePos: Vec2, anchor: Vec2, t: number): Vec2 {
   const lx = anchor.x + (kitePos.x - anchor.x) * t;
   const ly = anchor.y + (kitePos.y - anchor.y) * t;
-  const sag = Math.sin(t * Math.PI) * 20 * (1 - t * 0.5);
+  const sag = Math.sin(t * Math.PI) * STRING_SAG_PENCH * (1 - t * 0.5);
   return { x: lx, y: ly + sag };
 }
 
