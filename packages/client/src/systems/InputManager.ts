@@ -101,21 +101,17 @@ export class InputManager {
     this.touchPull = false;
     this.touchSteer = 0;
 
-    for (let i = 0; i < touches.length; i++) {
-      const touch = touches[i];
-      const x = touch.clientX;
+    if (touches.length === 0) return;
 
-      // Right half = pull, left half = steer
-      if (x > screenW * 0.5) {
-        this.touchPull = true;
-      } else {
-        // Left third = steer left, middle third = no steer
-        if (x < screenW * 0.25) {
-          this.touchSteer = -1;
-        } else {
-          this.touchSteer = 1;
-        }
-      }
+    const touch = touches[0]; // only use first touch
+    const x = touch.clientX;
+
+    this.touchPull = true;
+
+    if (x < screenW * 0.4) {
+      this.touchSteer = -1;
+    } else if (x > screenW * 0.6) {
+      this.touchSteer = 1;
     }
   }
 
