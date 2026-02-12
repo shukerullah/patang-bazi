@@ -9,6 +9,7 @@
     "dev:server": "turbo run dev --filter=@patang/server",
     "build": "turbo run build",
     "clean": "turbo run clean",
+    "nuke": "npx rimraf node_modules .turbo pnpm-lock.yaml packages/client/node_modules packages/server/node_modules packages/shared/node_modules packages/client/.turbo packages/server/.turbo packages/shared/.turbo",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck"
   },
