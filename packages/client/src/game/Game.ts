@@ -471,7 +471,18 @@ export class Game {
       clearTimeout(loadingTimer2);
 
       this.lobbyUI.hideLoading();
-      const msg = err instanceof Error ? err.message : String(err);
+
+      let msg = 'Unknown error';
+      if (err instanceof Error) {
+        msg = err.message;
+      } else if (typeof err === 'object' && err !== null && 'type' in err && (err as any).type === 'error') {
+        // WebSocket connection error often comes as an Event/ProgressEvent
+        msg = 'Could not reach server';
+      } else {
+        msg = String(err);
+      }
+
+      console.error('Connection error:', err);
       this.lobbyUI.showError(`Connection failed: ${msg}`);
     }
   }

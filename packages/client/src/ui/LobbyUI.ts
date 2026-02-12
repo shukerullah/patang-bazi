@@ -83,11 +83,13 @@ export class LobbyUI {
         @keyframes countPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
         .lobby-instructions {
           margin-top: 24px; text-align: center; color: rgba(255,255,255,0.3);
-          font-size: 12px; line-height: 2;
+          font-size: 12px; display: flex; flex-direction: column; gap: 8px;
+          padding: 0 16px; width: 100%; box-sizing: border-box;
         }
         .lobby-instructions kbd {
           background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.2);
-          border-radius: 4px; padding: 1px 7px; color: #ffd666; font-weight: 600;
+          border-radius: 4px; padding: 2px 7px; color: #ffd666; font-weight: 600;
+          font-family: inherit; font-size: 11px;
         }
         /* Loading spinner */
         .lobby-loading {
@@ -115,7 +117,7 @@ export class LobbyUI {
           .lobby-btn { padding: 10px 32px; font-size: 18px; }
           .lobby-status { font-size: 12px; max-width: 300px; }
           .lobby-countdown { font-size: 64px; }
-          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; }
+          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; padding-horizontal: 16:px; }
         }
         @media (max-width: 360px) {
           .lobby-title { font-size: 26px; }
@@ -137,8 +139,8 @@ export class LobbyUI {
       <div class="lobby-players" id="lobby-players"></div>
       <div class="lobby-countdown" id="lobby-countdown">3</div>
       <div class="lobby-instructions" id="lobby-instructions">
-        <kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up<br>
-        <kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!
+        <div><kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up</div>
+        <div><kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!</div>
       </div>
     `;
     document.body.appendChild(this.overlay);
@@ -152,7 +154,7 @@ export class LobbyUI {
     this.instructionsEl = document.getElementById('lobby-instructions') as HTMLDivElement;
 
     // Random default name
-    const names = ['Ustaad', 'Patangbaaz', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
+    const names = ['Ustaad', 'Patangbaaz', 'Sultan', 'Dorbaaz', 'Shikari', 'Khiladi', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
     this.nameInput.value = names[Math.floor(Math.random() * names.length)] +
       Math.floor(Math.random() * 99);
 
