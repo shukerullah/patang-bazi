@@ -249,17 +249,22 @@ export class Game {
     hud.id = 'hud';
     hud.innerHTML = `
       <style>
-        /* === TOP BAR: stats only === */
+        /* === TOP BAR: title left, stats right === */
         #hud {
           position: fixed; top: 0; left: 0; right: 0;
           padding: 12px 16px;
-          display: flex; justify-content: flex-end; align-items: flex-start;
+          display: flex; justify-content: space-between; align-items: flex-start;
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
         }
+        .game-title {
+          font-family: 'Baloo 2', cursive; font-size: 22px; font-weight: 800; color: #fff;
+          text-shadow: 0 2px 20px rgba(255,150,50,0.4); line-height: 1;
+          white-space: nowrap; flex-shrink: 0;
+        }
         .stats {
-          display: flex; gap: 6px; flex-wrap: wrap;
-          justify-content: flex-end; align-items: center;
+          display: flex; gap: 6px; flex-wrap: nowrap;
+          align-items: center;
         }
         .stat-pill {
           background: rgba(0,0,0,0.35); backdrop-filter: blur(12px);
@@ -268,7 +273,14 @@ export class Game {
           color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 4px;
           white-space: nowrap;
         }
-        .stat-pill .val { color: #ffd666; font-weight: 700; font-size: 12px; }
+        .stat-pill .val {
+          color: #ffd666; font-weight: 700; font-size: 12px;
+          display: inline-block; text-align: right;
+        }
+        .val-time { min-width: 30px; }
+        .val-alt  { min-width: 24px; }
+        .val-score { min-width: 24px; }
+        .val-wind { min-width: 52px; }
         .mute-btn {
           background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1);
           border-radius: 50%; width: 30px; height: 30px;
@@ -278,17 +290,12 @@ export class Game {
         }
         .mute-btn:hover { background: rgba(255,255,255,0.1); }
 
-        /* === BOTTOM-LEFT: branding + phase === */
+        /* === BOTTOM-LEFT: room info only === */
         #hud-bottom-left {
           position: fixed; bottom: 12px; left: 16px;
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
           display: flex; flex-direction: column; gap: 2px;
-        }
-        .game-title {
-          font-family: 'Baloo 2', cursive; font-size: 20px; font-weight: 800; color: #fff;
-          text-shadow: 0 2px 16px rgba(255,150,50,0.3); line-height: 1;
-          opacity: 0.7;
         }
         .hud-phase {
           font-size: 10px; color: rgba(255,255,255,0.35); font-weight: 500;
@@ -345,47 +352,53 @@ export class Game {
           background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.25);
           border-radius: 4px; padding: 1px 5px; color: #ffd666; font-weight: 700; font-size: 10px;
         }
+        .controls-mobile { display: none; }
 
         /* ====== MOBILE ====== */
         @media (max-width: 600px) {
           #hud { padding: 8px 10px; }
+          .game-title { font-size: 16px; }
           .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
           .stat-pill .val { font-size: 10px; }
+          .val-time { min-width: 26px; }
+          .val-alt  { min-width: 20px; }
+          .val-score { min-width: 20px; }
+          .val-wind { min-width: 44px; }
           .mute-btn { width: 26px; height: 26px; font-size: 12px; }
           .scoreboard { top: 40px; right: 8px; }
           .sb-row { padding: 2px 8px; font-size: 10px; }
           .sb-name { max-width: 60px; }
           #score-popup { font-size: 32px; }
-          .controls-inner { display: none; }
+          .controls-desktop { display: none; }
+          .controls-mobile { display: flex; }
           #toast-container { top: 42px; left: 8px; }
           #hud-bottom-left { bottom: 8px; left: 10px; }
-          .game-title { font-size: 15px; }
           .hud-phase { font-size: 9px; }
           .game-version { font-size: 8px; }
         }
 
         @media (max-width: 400px) {
+          .game-title { font-size: 14px; }
           .stat-pill { padding: 2px 6px; font-size: 9px; border-radius: 14px; }
           .stats { gap: 4px; }
-          .game-title { font-size: 13px; }
         }
       </style>
+      <div class="game-title">🪁 PATANG BAZI</div>
       <div class="stats">
-        <div class="stat-pill">⏱ <span class="val" id="hTime">3:00</span></div>
-        <div class="stat-pill">📍 <span class="val" id="hAlt">0</span>m</div>
-        <div class="stat-pill">⭐ <span class="val" id="hScore">0</span></div>
-        <div class="stat-pill">💨 <span class="val" id="hWind">→</span></div>
+        <div class="stat-pill">⏱ <span class="val val-time" id="hTime">3:00</span></div>
+        <div class="stat-pill">📍 <span class="val val-alt" id="hAlt">0</span>m</div>
+        <div class="stat-pill">⭐ <span class="val val-score" id="hScore">0</span></div>
+        <div class="stat-pill">💨 <span class="val val-wind" id="hWind">→</span></div>
         <button class="mute-btn" id="muteBtn">🔊</button>
       </div>
     `;
     document.body.appendChild(hud);
     this.hudEl = hud;
 
-    // Bottom-left branding
+    // Bottom-left: room info + version (NOT title — title is top-left now)
     const bottomLeft = document.createElement('div');
     bottomLeft.id = 'hud-bottom-left';
     bottomLeft.innerHTML = `
-      <div class="game-title">🪁 PATANG BAZI</div>
       <div class="hud-phase" id="hPhase"></div>
       <div class="game-version">v${GAME_VERSION}</div>
     `;
@@ -401,14 +414,19 @@ export class Game {
     popup.id = 'score-popup';
     document.body.appendChild(popup);
 
-    // Controls
+    // Controls — desktop + mobile variants
     const controls = document.createElement('div');
     controls.id = 'controls-bar';
     controls.innerHTML = `
-      <div class="controls-inner">
+      <div class="controls-inner controls-desktop">
         <span><kbd>SPACE</kbd> / <kbd>CLICK</kbd> Pull up</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Steer</span>
         <span>Cross strings to cut opponents!</span>
+      </div>
+      <div class="controls-inner controls-mobile">
+        <span>Touch to pull up</span>
+        <span>👈 Left · Right 👉 to steer</span>
+        <span>Cross strings to cut!</span>
       </div>
     `;
     document.body.appendChild(controls);

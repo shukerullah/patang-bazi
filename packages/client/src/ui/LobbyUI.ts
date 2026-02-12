@@ -91,6 +91,7 @@ export class LobbyUI {
           border-radius: 4px; padding: 2px 7px; color: #ffd666; font-weight: 600;
           font-family: inherit; font-size: 11px;
         }
+        .lobby-inst-mobile { display: none; }
         /* Loading spinner */
         .lobby-loading {
           display: none; flex-direction: column; align-items: center; gap: 16px;
@@ -117,7 +118,9 @@ export class LobbyUI {
           .lobby-btn { padding: 10px 32px; font-size: 18px; }
           .lobby-status { font-size: 12px; max-width: 300px; }
           .lobby-countdown { font-size: 64px; }
-          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; padding-horizontal: 16:px; }
+          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; }
+          .lobby-inst-desktop { display: none; }
+          .lobby-inst-mobile { display: block; }
         }
         @media (max-width: 360px) {
           .lobby-title { font-size: 26px; }
@@ -139,8 +142,15 @@ export class LobbyUI {
       <div class="lobby-players" id="lobby-players"></div>
       <div class="lobby-countdown" id="lobby-countdown">3</div>
       <div class="lobby-instructions" id="lobby-instructions">
-        <div><kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up</div>
-        <div><kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!</div>
+        <div class="lobby-inst-desktop">
+          <div><kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up</div>
+          <div><kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!</div>
+        </div>
+        <div class="lobby-inst-mobile">
+          <div>Touch anywhere to pull string & fly up</div>
+          <div>Left side to steer left · Right side to steer right</div>
+          <div>Catch ⭐ stars · Cut opponents' strings!</div>
+        </div>
       </div>
     `;
     document.body.appendChild(this.overlay);
