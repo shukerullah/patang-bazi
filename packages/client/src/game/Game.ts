@@ -27,6 +27,7 @@ import {
   PLAYER_COLORS,
   STAR_POINTS,
   SCORE_KITE_CUT,
+  GAME_VERSION,
   stepKite,
   type PlayerInput,
   type KiteState,
@@ -248,22 +249,13 @@ export class Game {
     hud.id = 'hud';
     hud.innerHTML = `
       <style>
+        /* === TOP BAR: stats only === */
         #hud {
           position: fixed; top: 0; left: 0; right: 0;
           padding: 12px 16px;
-          display: flex; justify-content: space-between; align-items: flex-start;
+          display: flex; justify-content: flex-end; align-items: flex-start;
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
-        }
-        .hud-left { display: flex; flex-direction: column; gap: 4px; max-width: 40%; }
-        .game-title {
-          font-family: 'Baloo 2', cursive; font-size: 22px; font-weight: 800; color: #fff;
-          text-shadow: 0 2px 20px rgba(255,150,50,0.4); line-height: 1;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .hud-phase {
-          font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 500;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .stats {
           display: flex; gap: 6px; flex-wrap: wrap;
@@ -285,6 +277,27 @@ export class Game {
           color: rgba(255,255,255,0.7); transition: background 0.2s;
         }
         .mute-btn:hover { background: rgba(255,255,255,0.1); }
+
+        /* === BOTTOM-LEFT: branding + phase === */
+        #hud-bottom-left {
+          position: fixed; bottom: 12px; left: 16px;
+          pointer-events: none; z-index: 10;
+          font-family: 'Poppins', sans-serif;
+          display: flex; flex-direction: column; gap: 2px;
+        }
+        .game-title {
+          font-family: 'Baloo 2', cursive; font-size: 20px; font-weight: 800; color: #fff;
+          text-shadow: 0 2px 16px rgba(255,150,50,0.3); line-height: 1;
+          opacity: 0.7;
+        }
+        .hud-phase {
+          font-size: 10px; color: rgba(255,255,255,0.35); font-weight: 500;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .game-version {
+          font-size: 9px; color: rgba(255,255,255,0.2); font-weight: 400;
+          letter-spacing: 0.5px;
+        }
 
         /* Score popup */
         #score-popup {
@@ -336,8 +349,6 @@ export class Game {
         /* ====== MOBILE ====== */
         @media (max-width: 600px) {
           #hud { padding: 8px 10px; }
-          .game-title { font-size: 16px; }
-          .hud-phase { font-size: 9px; }
           .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
           .stat-pill .val { font-size: 10px; }
           .mute-btn { width: 26px; height: 26px; font-size: 12px; }
@@ -347,18 +358,18 @@ export class Game {
           #score-popup { font-size: 32px; }
           .controls-inner { display: none; }
           #toast-container { top: 42px; left: 8px; }
+          #hud-bottom-left { bottom: 8px; left: 10px; }
+          .game-title { font-size: 15px; }
+          .hud-phase { font-size: 9px; }
+          .game-version { font-size: 8px; }
         }
 
         @media (max-width: 400px) {
-          .game-title { font-size: 14px; }
           .stat-pill { padding: 2px 6px; font-size: 9px; border-radius: 14px; }
           .stats { gap: 4px; }
+          .game-title { font-size: 13px; }
         }
       </style>
-      <div class="hud-left">
-        <div class="game-title">🪁 PATANG BAZI</div>
-        <div class="hud-phase" id="hPhase"></div>
-      </div>
       <div class="stats">
         <div class="stat-pill">⏱ <span class="val" id="hTime">3:00</span></div>
         <div class="stat-pill">📍 <span class="val" id="hAlt">0</span>m</div>
@@ -370,7 +381,16 @@ export class Game {
     document.body.appendChild(hud);
     this.hudEl = hud;
 
-    // Scoreboard
+    // Bottom-left branding
+    const bottomLeft = document.createElement('div');
+    bottomLeft.id = 'hud-bottom-left';
+    bottomLeft.innerHTML = `
+      <div class="game-title">🪁 PATANG BAZI</div>
+      <div class="hud-phase" id="hPhase"></div>
+      <div class="game-version">v${GAME_VERSION}</div>
+    `;
+    document.body.appendChild(bottomLeft);
+
     const sb = document.createElement('div');
     sb.className = 'scoreboard';
     sb.id = 'scoreboard';
@@ -503,11 +523,11 @@ export class Game {
 
     // Pench
     this.network.on('penchStart', (msg: any) => {
-      this.penchRenderer.onPenchStart(msg.key, msg.playerAId, msg.playerBId, msg.position);
+      this.penchRenderer.ensurePench(msg.key, msg.playerAId, msg.playerBId, msg.position, '');
     });
 
     this.network.on('penchUpdate', (msg: any) => {
-      this.penchRenderer.onPenchUpdate(msg.key, msg.progress, msg.position);
+      this.penchRenderer.syncProgress(msg.key, msg.progress, msg.position, msg.winnerId);
       if (msg.spark) {
         this.sound.playPenchSpark();
         if (msg.progress > 0.5 && this.isLocalInvolved(msg.key)) {
@@ -517,7 +537,7 @@ export class Game {
     });
 
     this.network.on('penchEnd', (msg: any) => {
-      if (msg.key) this.penchRenderer.onPenchEnd(msg.key);
+      if (msg.key) this.penchRenderer.removePench(msg.key);
     });
 
     // Kite cut
@@ -780,11 +800,29 @@ export class Game {
 
     // --- Pench schema sync ---
     if (state.penches) {
+      const activeSchemaKeys = new Set<string>();
       state.penches.forEach((p: any) => {
         if (!p.active) return;
-        this.penchRenderer.onPenchUpdate(p.id, p.progress, { x: p.position.x, y: p.position.y });
-        this.penchRenderer.onPenchStart(p.id, p.playerAId, p.playerBId, { x: p.position.x, y: p.position.y });
+        activeSchemaKeys.add(p.id);
+        // Ensure pench exists without resetting progress
+        this.penchRenderer.ensurePench(
+          p.id, p.playerAId, p.playerBId,
+          { x: p.position.x, y: p.position.y }, p.winnerId,
+        );
+        // Sync actual progress value
+        this.penchRenderer.syncProgress(
+          p.id, p.progress,
+          { x: p.position.x, y: p.position.y }, p.winnerId,
+        );
       });
+
+      // Remove penches no longer in schema (except cut burst effects)
+      for (const key of this.penchRenderer.getActiveKeys()) {
+        if (key === '__cut_burst__') continue;
+        if (!activeSchemaKeys.has(key)) {
+          this.penchRenderer.removePench(key);
+        }
+      }
     }
 
     // --- Render players ---

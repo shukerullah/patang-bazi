@@ -3,6 +3,9 @@
 // Shared across client & server
 // ============================================
 
+// --- Game Info ---
+export const GAME_VERSION = '0.3.0-alpha';
+
 // --- Simulation ---
 export const TICK_RATE = 60;                   // Physics ticks per second
 export const SERVER_SEND_RATE = 20;            // Network updates per second
