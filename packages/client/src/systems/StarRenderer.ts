@@ -1,6 +1,8 @@
 // ============================================
 // PATANG BAZI — Star Renderer
-// Collectible stars with glow & rotation
+// Collectible stars with glow, rotation,
+// pop-in appear & pop-out disappear animations
+// No opacity/progress/countdown — clean pops only
 // ============================================
 
 import { Container, Graphics } from 'pixi.js';
@@ -14,29 +16,56 @@ export interface StarData {
   pulse: number;
 }
 
+type StarPhase = 'appearing' | 'visible' | 'disappearing';
+
+const APPEAR_DURATION = 0.35;    // seconds for pop-in
+const DISAPPEAR_DURATION = 0.25; // seconds for pop-out
+
+interface StarEntry {
+  data: StarData;
+  graphics: Graphics;
+  glowGraphics: Graphics;
+  phase: StarPhase;
+  phaseTime: number;  // seconds elapsed in current phase
+}
+
 export class StarRenderer {
   private container: Container;
-  private stars: Map<string, { data: StarData; graphics: Graphics; glowGraphics: Graphics }> = new Map();
+  private stars: Map<string, StarEntry> = new Map();
+
+  // Track which stars were collected (not expired) so we skip disappear anim
+  private collectedIds = new Set<string>();
 
   constructor(parent: Container) {
     this.container = new Container();
     parent.addChild(this.container);
   }
 
-  /** Sync the star list (add new, remove collected) */
+  /** Sync the star list from server state */
   syncStars(starList: StarData[]) {
-    const activeIds = new Set(starList.filter(s => s.active).map(s => s.id));
+    const activeIds = new Set<string>();
+    for (const s of starList) {
+      if (s.active) activeIds.add(s.id);
+    }
 
-    // Remove stars no longer active
+    // Stars no longer active → start disappear (unless collected or already disappearing)
     for (const [id, entry] of this.stars) {
-      if (!activeIds.has(id)) {
-        entry.graphics.destroy();
-        entry.glowGraphics.destroy();
-        this.stars.delete(id);
+      if (!activeIds.has(id) && entry.phase !== 'disappearing') {
+        if (this.collectedIds.has(id)) {
+          // Collected stars are removed instantly (particles handle the visual)
+          this.collectedIds.delete(id);
+          entry.graphics.destroy();
+          entry.glowGraphics.destroy();
+          this.stars.delete(id);
+        } else {
+          // Timer expired: play disappear animation
+          entry.phase = 'disappearing';
+          entry.phaseTime = 0;
+        }
       }
     }
 
-    // Add new stars
+    // Add new stars (with appear animation)
     for (const star of starList) {
       if (!star.active) continue;
       if (!this.stars.has(star.id)) {
@@ -44,19 +73,60 @@ export class StarRenderer {
         const graphics = new Graphics();
         this.container.addChild(glowGraphics);
         this.container.addChild(graphics);
-        this.stars.set(star.id, { data: star, graphics, glowGraphics });
+        this.stars.set(star.id, {
+          data: star,
+          graphics,
+          glowGraphics,
+          phase: 'appearing',
+          phaseTime: 0,
+        });
       } else {
         this.stars.get(star.id)!.data = star;
       }
     }
   }
 
-  update(gameTime: number) {
-    for (const [, entry] of this.stars) {
+  update(gameTime: number, dt: number) {
+    const toRemove: string[] = [];
+
+    for (const [id, entry] of this.stars) {
       const { data, graphics: g, glowGraphics: glow } = entry;
+
+      entry.phaseTime += dt;
+
+      // Phase transitions
+      if (entry.phase === 'appearing' && entry.phaseTime >= APPEAR_DURATION) {
+        entry.phase = 'visible';
+        entry.phaseTime = 0;
+      }
+      if (entry.phase === 'disappearing' && entry.phaseTime >= DISAPPEAR_DURATION) {
+        toRemove.push(id);
+        continue;
+      }
+
+      // Calculate scale based on phase
+      let scale = 1;
+      if (entry.phase === 'appearing') {
+        const t = Math.min(1, entry.phaseTime / APPEAR_DURATION);
+        scale = easeOutBack(t);
+      } else if (entry.phase === 'disappearing') {
+        const t = Math.min(1, entry.phaseTime / DISAPPEAR_DURATION);
+        scale = 1 - easeInBack(t);
+        if (scale < 0) scale = 0;
+      }
+
+      // Pulse (only when visible or appearing)
       data.pulse += 0.03;
-      const pulseScale = Math.sin(data.pulse) * 0.15 + 1;
-      const sz = data.size * pulseScale;
+      const pulseScale = entry.phase !== 'disappearing'
+        ? Math.sin(data.pulse) * 0.15 + 1
+        : 1;
+      const sz = data.size * pulseScale * scale;
+
+      if (sz < 0.5) {
+        glow.clear();
+        g.clear();
+        continue;
+      }
 
       // Glow
       glow.clear();
@@ -65,9 +135,6 @@ export class StarRenderer {
 
       // Star shape
       g.clear();
-      g.position.set(0, 0);
-
-      // Draw 5-pointed star
       const cx = data.position.x;
       const cy = data.position.y;
       const outerR = sz;
@@ -87,13 +154,24 @@ export class StarRenderer {
       g.closePath();
       g.fill(0xffd666);
     }
+
+    // Destroy completed disappearing stars
+    for (const id of toRemove) {
+      const entry = this.stars.get(id);
+      if (entry) {
+        entry.graphics.destroy();
+        entry.glowGraphics.destroy();
+        this.stars.delete(id);
+      }
+    }
   }
 
-  /** Remove a star with animation trigger */
+  /** Remove a star immediately (for collection — particles handle the visual) */
   collectStar(id: string): Vec2 | null {
     const entry = this.stars.get(id);
     if (!entry) return null;
     const pos = { ...entry.data.position };
+    this.collectedIds.add(id);
     entry.graphics.destroy();
     entry.glowGraphics.destroy();
     this.stars.delete(id);
@@ -103,4 +181,20 @@ export class StarRenderer {
   destroy() {
     this.container.destroy({ children: true });
   }
+}
+
+// --- Easing functions ---
+
+/** Elastic overshoot on appear */
+function easeOutBack(t: number): number {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+/** Quick pullback on disappear */
+function easeInBack(t: number): number {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return c3 * t * t * t - c1 * t * t;
 }

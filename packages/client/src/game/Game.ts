@@ -22,8 +22,8 @@ import { LobbyUI } from '../ui/LobbyUI';
 import {
   WORLD_WIDTH,
   WORLD_HEIGHT,
-  TICK_RATE,
   FIXED_DT,
+  SERVER_SEND_RATE,
   PLAYER_COLORS,
   STAR_POINTS,
   SCORE_KITE_CUT,
@@ -158,7 +158,7 @@ export class Game {
   private gameTime = 0;
   private inputSeq = 0;
   private inputSendAccum = 0;        // Accumulator for throttled input sending
-  private readonly INPUT_SEND_INTERVAL = 1 / TICK_RATE;  // Send at tick rate
+  private readonly INPUT_SEND_INTERVAL = 1 / SERVER_SEND_RATE;  // Send at server's receive rate (20fps)
 
   // Track last input to avoid redundant sends
   private lastSentPull = false;
@@ -177,6 +177,8 @@ export class Game {
   private hudTime!: HTMLElement;
   private hudPlayers!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
+  private hudUpdateAccum = 0;
+  private lastScoreboardHtml = '';
 
   constructor(app: Application, input: InputManager, network: NetworkManager) {
     this.app = app;
@@ -825,7 +827,7 @@ export class Game {
       });
     }
     this.starRenderer.syncStars(starList);
-    this.starRenderer.update(this.gameTime);
+    this.starRenderer.update(this.gameTime, dt);
 
     // --- Pench schema sync ---
     if (state.penches) {
@@ -893,16 +895,17 @@ export class Game {
     this.particleSystem.update(dt);
 
     // --- HUD ---
-    this.updateHUD(state, wind);
+    this.updateHUD(state, wind, dt);
   }
 
   // ========================
   // HUD
   // ========================
 
-  private updateHUD(state: any, wind: WindState) {
+  private updateHUD(state: any, wind: WindState, dt: number) {
     const localPlayer = state.players.get(this.localPlayerId);
 
+    // Cheap textContent updates — safe every frame
     if (localPlayer) {
       const heightM = Math.max(0, Math.round(
         (localPlayer.anchorPosition.y - localPlayer.kite.position.y) / (WORLD_HEIGHT * 0.008)
@@ -911,17 +914,22 @@ export class Game {
       this.hudScore.textContent = String(localPlayer.score);
     }
 
-    const arrow = wind.direction > 0 ? '→' : '←';
-    this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
-
     const secs = Math.max(0, Math.ceil(state.timeRemaining));
     this.hudTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+
+    // Throttle expensive updates (~4fps)
+    this.hudUpdateAccum += dt;
+    if (this.hudUpdateAccum < 0.25) return;
+    this.hudUpdateAccum = 0;
+
+    const arrow = wind.direction > 0 ? '→' : '←';
+    this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
 
     this.hudPhase.textContent = state.phase === 'playing'
       ? `Room: ${this.network.roomId?.slice(0, 6)} · ${state.players.size} players`
       : state.phase;
 
-    // Scoreboard
+    // Scoreboard — only rewrite DOM when content changes
     const rows: string[] = [];
     const sorted = Array.from(state.players.entries() as Iterable<[string, any]>)
       .sort(([, a]: [string, any], [, b]: [string, any]) => b.score - a.score);
@@ -937,7 +945,11 @@ export class Game {
         </div>
       `);
     }
-    this.hudPlayers.innerHTML = rows.join('');
+    const html = rows.join('');
+    if (html !== this.lastScoreboardHtml) {
+      this.lastScoreboardHtml = html;
+      this.hudPlayers.innerHTML = html;
+    }
   }
 
   // ========================
