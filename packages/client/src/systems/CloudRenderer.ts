@@ -23,14 +23,14 @@ export class CloudRenderer {
     this.graphics = new Graphics();
     parent.addChild(this.graphics);
 
-    // Generate clouds
-    for (let i = 0; i < 8; i++) {
+    // Generate clouds — visible but not distracting
+    for (let i = 0; i < 12; i++) {
       this.clouds.push({
         x: Math.random() * WORLD_WIDTH,
         y: WORLD_HEIGHT * 0.05 + Math.random() * WORLD_HEIGHT * 0.4,
-        w: 80 + Math.random() * 160,
+        w: 100 + Math.random() * 200,
         speed: 0.15 + Math.random() * 0.4,
-        opacity: 0.03 + Math.random() * 0.06,
+        opacity: 0.08 + Math.random() * 0.12,
       });
     }
   }

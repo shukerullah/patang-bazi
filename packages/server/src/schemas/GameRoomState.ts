@@ -24,6 +24,7 @@ export class PlayerSchema extends Schema {
   @type(KiteSchema) kite = new KiteSchema();
   @type(Vec2Schema) anchorPosition = new Vec2Schema();
   @type('int32') score: number = 0;
+  @type('uint8') cuts: number = 0;
   @type('uint32') lastProcessedInput: number = 0;
   @type('boolean') connected: boolean = true;
   @type('boolean') ready: boolean = false;

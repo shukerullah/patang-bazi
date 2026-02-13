@@ -176,8 +176,6 @@ export class Game {
   public hudEl: HTMLDivElement | null = null;
 
   // HUD refs
-  private hudHeight!: HTMLElement;
-  private hudScore!: HTMLElement;
   private hudWind!: HTMLElement;
   private hudPhase!: HTMLElement;
   private hudTime!: HTMLElement;
@@ -289,8 +287,6 @@ export class Game {
           display: inline-block; text-align: right;
         }
         .val-time { min-width: 30px; }
-        .val-alt  { min-width: 24px; }
-        .val-score { min-width: 24px; }
         .val-wind { min-width: 52px; }
         .mute-btn {
           background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1);
@@ -401,8 +397,6 @@ export class Game {
           .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
           .stat-pill .val { font-size: 10px; }
           .val-time { min-width: 26px; }
-          .val-alt  { min-width: 20px; }
-          .val-score { min-width: 20px; }
           .val-wind { min-width: 44px; }
           .mute-btn { width: 26px; height: 26px; font-size: 12px; }
           .scoreboard { top: 40px; right: 8px; }
@@ -430,8 +424,6 @@ export class Game {
       <div class="game-title">🪁 PATANG BAZI</div>
       <div class="stats">
         <div class="stat-pill">⏱ <span class="val val-time" id="hTime">3:00</span></div>
-        <div class="stat-pill">📍 <span class="val val-alt" id="hAlt">0</span>m</div>
-        <div class="stat-pill">⭐ <span class="val val-score" id="hScore">0</span></div>
         <div class="stat-pill">💨 <span class="val val-wind" id="hWind">→</span></div>
         <button class="mute-btn" id="muteBtn">🔊</button>
       </div>
@@ -487,8 +479,6 @@ export class Game {
     `;
     document.body.appendChild(manjhaBar);
 
-    this.hudHeight = document.getElementById('hAlt')!;
-    this.hudScore = document.getElementById('hScore')!;
     this.hudWind = document.getElementById('hWind')!;
     this.hudPhase = document.getElementById('hPhase')!;
     this.hudTime = document.getElementById('hTime')!;
@@ -733,25 +723,32 @@ export class Game {
     const state = this.network.state;
     if (!state) return;
 
-    // Build results string
-    let results = '🏆 Game Over! ';
-    const sorted = Array.from(state.players.entries() as Iterable<[string, any]>)
-      .sort(([, a]: [string, any], [, b]: [string, any]) => b.score - a.score);
-    sorted.forEach(([id, p]: [string, any], i: number) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-      const you = id === this.localPlayerId ? ' (you)' : '';
-      results += `${medal} ${p.name}${you}: ${p.score}  `;
-    });
+    // Build structured player results
+    const players: Array<{
+      name: string; score: number; color: string;
+      isLocal: boolean; cuts: number;
+    }> = [];
 
-    // Show results overlay (inputs disabled)
-    this.lobbyUI.showResults(results);
+    for (const [id, p] of state.players.entries() as Iterable<[string, any]>) {
+      const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
+      players.push({
+        name: p.name || 'Player',
+        score: p.score,
+        color: palette.primary,
+        isLocal: id === this.localPlayerId,
+        cuts: p.cuts ?? 0,
+      });
+    }
 
-    // After 3 seconds: disconnect, cleanup, show fresh lobby
-    setTimeout(async () => {
+    // Show polished results overlay
+    this.lobbyUI.showResults(players);
+
+    // Wire up "Play Again" → disconnect, cleanup, show lobby
+    this.lobbyUI.onPlayAgain(async () => {
       await this.network.disconnect();
       this.cleanupGameState();
       this.lobbyUI.reset();
-    }, 3000);
+    });
   }
 
   /** Clean up all game state between sessions */
@@ -973,12 +970,6 @@ export class Game {
 
     // Cheap textContent updates — safe every frame
     if (localPlayer) {
-      const heightM = Math.max(0, Math.round(
-        (localPlayer.anchorPosition.y - localPlayer.kite.position.y) / (WORLD_HEIGHT * 0.008)
-      ));
-      this.hudHeight.textContent = String(heightM);
-      this.hudScore.textContent = String(localPlayer.score);
-
       // Manjha (string) length bar
       const dx = localPlayer.kite.position.x - localPlayer.anchorPosition.x;
       const dy = localPlayer.kite.position.y - localPlayer.anchorPosition.y;

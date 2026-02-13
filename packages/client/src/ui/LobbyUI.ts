@@ -9,6 +9,7 @@ export type LobbyCallback = (name: string) => void;
 
 export class LobbyUI {
   private overlay: HTMLDivElement;
+  private resultsOverlay!: HTMLDivElement;
   private statusEl!: HTMLDivElement;
   private playerListEl!: HTMLDivElement;
   private countdownEl!: HTMLDivElement;
@@ -126,6 +127,94 @@ export class LobbyUI {
           .lobby-title { font-size: 26px; }
           .lobby-input { width: 180px; }
         }
+
+        /* === GAME OVER RESULTS === */
+        #results-overlay {
+          position: fixed; inset: 0; z-index: 35;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          background: rgba(10,5,25,0.92);
+          backdrop-filter: blur(24px);
+          font-family: 'Poppins', sans-serif;
+          opacity: 0; pointer-events: none;
+          transition: opacity 0.6s ease;
+        }
+        #results-overlay.visible { opacity: 1; pointer-events: auto; }
+
+        .results-header {
+          font-family: 'Baloo 2', cursive; font-size: 42px; font-weight: 800;
+          color: #ffd666; text-shadow: 0 4px 30px rgba(255,180,50,0.4);
+          margin-bottom: 6px;
+        }
+        .results-sub {
+          font-size: 13px; color: rgba(255,255,255,0.35); margin-bottom: 28px;
+        }
+        .results-list {
+          display: flex; flex-direction: column; gap: 10px;
+          width: 320px; max-width: 90vw;
+        }
+        .result-row {
+          display: flex; align-items: center; gap: 12px;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 14px; padding: 12px 18px;
+          transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        .result-row.winner {
+          background: rgba(255,214,102,0.08);
+          border-color: rgba(255,214,102,0.2);
+          box-shadow: 0 0 30px rgba(255,214,102,0.08);
+        }
+        .result-row.you {
+          border-color: rgba(255,255,255,0.15);
+        }
+        .result-rank {
+          font-size: 28px; flex-shrink: 0; width: 36px; text-align: center;
+        }
+        .result-info { flex: 1; min-width: 0; }
+        .result-name {
+          font-size: 15px; font-weight: 600; color: #fff;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .result-name .you-tag {
+          font-size: 10px; font-weight: 500; color: #ffd666;
+          margin-left: 6px; opacity: 0.7;
+        }
+        .result-stats {
+          font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px;
+        }
+        .result-score {
+          font-family: 'Baloo 2', cursive; font-size: 24px; font-weight: 700;
+          color: #ffd666; flex-shrink: 0;
+        }
+        .result-row.winner .result-score { color: #ffd666; }
+
+        .results-play-again {
+          margin-top: 32px; opacity: 0; transform: translateY(10px);
+          transition: opacity 0.5s ease, transform 0.5s ease;
+        }
+        .results-play-again.visible { opacity: 1; transform: translateY(0); }
+        .results-play-again button {
+          background: linear-gradient(135deg, #ff8a3d, #ff5e62); border: none;
+          border-radius: 50px; padding: 12px 40px;
+          font-family: 'Baloo 2', cursive; font-size: 20px; font-weight: 700;
+          color: #fff; cursor: pointer;
+          box-shadow: 0 6px 24px rgba(255,94,98,0.4);
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .results-play-again button:hover {
+          transform: scale(1.05); box-shadow: 0 10px 32px rgba(255,94,98,0.5);
+        }
+
+        @media (max-width: 600px) {
+          .results-header { font-size: 32px; }
+          .results-list { width: 280px; }
+          .result-row { padding: 10px 14px; gap: 10px; }
+          .result-rank { font-size: 22px; width: 30px; }
+          .result-name { font-size: 13px; }
+          .result-score { font-size: 20px; }
+          .results-play-again button { padding: 10px 32px; font-size: 18px; }
+        }
       </style>
       <div class="lobby-kite">🪁</div>
       <div class="lobby-title">PATANG BAZI</div>
@@ -154,6 +243,11 @@ export class LobbyUI {
       </div>
     `;
     document.body.appendChild(this.overlay);
+
+    // Results overlay (separate from lobby)
+    this.resultsOverlay = document.createElement('div');
+    this.resultsOverlay.id = 'results-overlay';
+    document.body.appendChild(this.resultsOverlay);
 
     this.nameInput = document.getElementById('lobby-name') as HTMLInputElement;
     this.connectBtn = document.getElementById('lobby-connect') as HTMLButtonElement;
@@ -225,6 +319,7 @@ export class LobbyUI {
 
   /** Full reset to fresh "FLY!" state (after game over) */
   reset() {
+    this.resultsOverlay.classList.remove('visible');
     this.overlay.classList.remove('hidden');
     this.connectBtn.disabled = false;
     this.connectBtn.textContent = 'FLY! 🪁';
@@ -238,16 +333,87 @@ export class LobbyUI {
     // Keep the player's name from last game
   }
 
-  /** Show results briefly with disabled input (between games) */
-  showResults(text: string) {
-    this.overlay.classList.remove('hidden');
-    this.connectBtn.disabled = true;
-    this.nameInput.disabled = true;
-    this.statusEl.textContent = text;
-    this.statusEl.classList.remove('error');
-    this.playerListEl.innerHTML = '';
-    this.countdownEl.classList.remove('active');
-    this.loadingEl.classList.remove('active');
+  /** Show a polished results screen with ranked players */
+  showResults(players: Array<{
+    name: string; score: number; color: string;
+    isLocal: boolean; cuts: number;
+  }>) {
+    // Sort by score descending
+    const sorted = [...players].sort((a, b) => b.score - a.score);
+    const medals = ['🥇', '🥈', '🥉'];
+
+    // Find if local player won
+    const localIdx = sorted.findIndex(p => p.isLocal);
+    const headerText = localIdx === 0 ? '🏆 YOU WON!' : '🪁 GAME OVER';
+    const subText = localIdx === 0
+      ? 'Unmatched kite fighter!'
+      : localIdx === 1 ? 'So close! Almost had it.'
+      : 'Better luck next time!';
+
+    const rowsHtml = sorted.map((p, i) => {
+      const rank = i < 3 ? medals[i] : `${i + 1}`;
+      const classes = [
+        'result-row',
+        i === 0 ? 'winner' : '',
+        p.isLocal ? 'you' : '',
+      ].filter(Boolean).join(' ');
+      const youTag = p.isLocal ? '<span class="you-tag">YOU</span>' : '';
+      const safeName = p.name.replace(/[<>&"']/g, (c: string) =>
+        ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] || c
+      );
+      const stats = p.cuts > 0 ? `✂️ ${p.cuts} cut${p.cuts > 1 ? 's' : ''}` : '';
+      return `
+        <div class="${classes}" style="opacity:0; transform:translateY(12px); transition: opacity 0.4s ease ${0.15 + i * 0.12}s, transform 0.4s ease ${0.15 + i * 0.12}s;">
+          <div class="result-rank">${rank}</div>
+          <div class="result-info">
+            <div class="result-name">${safeName}${youTag}</div>
+            ${stats ? `<div class="result-stats">${stats}</div>` : ''}
+          </div>
+          <div class="result-score">${p.score}</div>
+        </div>
+      `;
+    }).join('');
+
+    this.resultsOverlay.innerHTML = `
+      <div class="results-header">${headerText}</div>
+      <div class="results-sub">${subText}</div>
+      <div class="results-list">${rowsHtml}</div>
+      <div class="results-play-again" id="results-play-again">
+        <button id="results-play-btn">FLY AGAIN! 🪁</button>
+      </div>
+    `;
+
+    this.resultsOverlay.classList.add('visible');
+
+    // Animate rows in
+    requestAnimationFrame(() => {
+      const rows = this.resultsOverlay.querySelectorAll('.result-row') as NodeListOf<HTMLElement>;
+      rows.forEach(r => { r.style.opacity = '1'; r.style.transform = 'translateY(0)'; });
+    });
+
+    // Show play again button after 3s
+    setTimeout(() => {
+      const playAgain = document.getElementById('results-play-again');
+      if (playAgain) playAgain.classList.add('visible');
+    }, 2500);
+
+    // Wire up play again button
+    const btn = document.getElementById('results-play-btn');
+    if (btn) btn.addEventListener('click', () => this.hideResults());
+  }
+
+  /** Hide results and return to lobby */
+  private hideResults() {
+    this.resultsOverlay.classList.remove('visible');
+    // Trigger the play again callback
+    if (this._onPlayAgain) this._onPlayAgain();
+  }
+
+  private _onPlayAgain: (() => void) | null = null;
+
+  /** Register callback for when player clicks Play Again */
+  onPlayAgain(cb: () => void) {
+    this._onPlayAgain = cb;
   }
 
   /** Show error state with reconnect available */
@@ -265,5 +431,6 @@ export class LobbyUI {
 
   destroy() {
     this.overlay.remove();
+    this.resultsOverlay.remove();
   }
 }

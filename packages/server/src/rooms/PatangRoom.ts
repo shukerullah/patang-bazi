@@ -312,7 +312,7 @@ export class PatangRoom extends Room<GameRoomState> {
     };
 
     // Build active stars for physics (single pass, no extra allocations)
-    const starsForPhysics: Array<{id: string; position: {x: number; y: number}; size: number; active: boolean}> = [];
+    const starsForPhysics: Array<{ id: string; position: { x: number; y: number }; size: number; active: boolean }> = [];
     for (let i = 0; i < this.state.stars.length; i++) {
       const s = this.state.stars[i];
       if (!s) continue;
@@ -526,6 +526,7 @@ export class PatangRoom extends Room<GameRoomState> {
     // Cut the loser's kite
     loser.kite.alive = false;
     winner.score += SCORE_KITE_CUT;
+    winner.cuts += 1;
 
     this.broadcast(MessageType.KITE_CUT, {
       cutterId: winner.id, victimId: loser.id, position,
