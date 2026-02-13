@@ -33,6 +33,11 @@ export class SkyRenderer {
   private screenW = 1920;
   private screenH = 1080;
 
+  // Cache: avoid redrawing 270+ rects every frame when camera hasn't moved
+  private lastCamY = -999;
+  private lastCamViewH = -999;
+  private lastScreenH = -1;
+
   // Pre-calculated star positions (deterministic)
   private bgStars: Array<{ x: number; y: number; seed: number }> = [];
 
@@ -67,11 +72,24 @@ export class SkyRenderer {
   setScreenSize(w: number, h: number) {
     this.screenW = w;
     this.screenH = h;
+    // Force sky redraw on next update
+    this.lastCamY = -999;
   }
 
   /** Redraw sky + sun based on camera position */
   update(gameTime: number, camera: Camera) {
-    this.drawSky(camera);
+    // Sky gradient: only redraw if camera moved enough to matter (>2px equivalent)
+    const camChanged = Math.abs(camera.y - this.lastCamY) > 2
+      || Math.abs(camera.viewH - this.lastCamViewH) > 1
+      || this.screenH !== this.lastScreenH;
+
+    if (camChanged) {
+      this.drawSky(camera);
+      this.lastCamY = camera.y;
+      this.lastCamViewH = camera.viewH;
+      this.lastScreenH = this.screenH;
+    }
+
     this.drawSun(camera);
     this.drawStars(gameTime, camera);
   }

@@ -4,6 +4,7 @@
 // ============================================
 
 import { Graphics, Container } from 'pixi.js';
+import { STRING_SAG_PULL, STRING_SAG_GLIDE } from '@patang/shared';
 import type { Vec2 } from '@patang/shared';
 
 export class StringRenderer {
@@ -24,7 +25,7 @@ export class StringRenderer {
     const g = this.graphics;
     g.clear();
 
-    const sagAmount = isPulling ? 8 : 25;
+    const sagAmount = isPulling ? STRING_SAG_PULL : STRING_SAG_GLIDE;
 
     // Build path
     let first = true;

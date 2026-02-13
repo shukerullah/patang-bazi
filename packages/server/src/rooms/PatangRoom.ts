@@ -27,6 +27,8 @@ import {
   STAR_SPAWN_DELAY_MIN,
   STAR_SPAWN_DELAY_MAX,
   STAR_POINTS,
+  STAR_LIFETIME_MIN,
+  STAR_LIFETIME_MAX,
   WIND_MIN_SPEED,
   WIND_MAX_SPEED,
   WIND_CHANGE_MIN_TIME,
@@ -34,6 +36,7 @@ import {
   SCORE_KITE_CUT,
   PENCH_DURATION,
   PENCH_TENSION_FACTOR,
+  DISCONNECT_TIMEOUT,
   MessageType,
   stepKite,
   checkPench,
@@ -44,6 +47,12 @@ import {
 // Key for a pench pair (always sorted so A < B)
 function penchKey(idA: string, idB: string): string {
   return idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`;
+}
+
+/** Sanitize player name: trim, limit length, strip dangerous chars */
+function sanitizeName(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return 'Player';
+  return raw.trim().replace(/[<>&"']/g, '').slice(0, 16) || 'Player';
 }
 
 // Server-side pench tracker
@@ -70,23 +79,27 @@ export class PatangRoom extends Room<GameRoomState> {
   // Spark sound throttle
   private lastSparkBroadcast = 0;
 
+  // Disconnect cleanup timers (sessionId → timeout)
+  private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   // Min players to start the first game
-  private static MIN_PLAYERS_TO_START = 1; // Change to 2 for production
+  private static MIN_PLAYERS_TO_START = 2;
 
   onCreate(_options: RoomJoinOptions) {
     this.setState(new GameRoomState());
     this.maxClients = MAX_PLAYERS_PER_ROOM;
 
     this.onMessage(MessageType.INPUT, (client, input: PlayerInput) => {
-      // Clamp steer to [-1, 1] to prevent cheating
+      // Validate and clamp to prevent cheating
       input.steer = Math.max(-1, Math.min(1, input.steer || 0));
+      input.pull = !!input.pull;  // Coerce to boolean
       this.currentInputs.set(client.sessionId, input);
     });
 
     this.onMessage(MessageType.PLAYER_READY, (client, data: { name: string }) => {
       const player = this.state.players.get(client.sessionId);
       if (player) {
-        player.name = data.name || 'Player';
+        player.name = sanitizeName(data.name);
         player.ready = true;
       }
 
@@ -105,7 +118,7 @@ export class PatangRoom extends Room<GameRoomState> {
 
     const player = new PlayerSchema();
     player.id = client.sessionId;
-    player.name = options.name || 'Player';
+    player.name = sanitizeName(options.name);
     player.colorIndex = this.colorAssignment % PLAYER_COLORS.length;
     player.connected = true;
 
@@ -146,13 +159,47 @@ export class PatangRoom extends Room<GameRoomState> {
     const player = this.state.players.get(client.sessionId);
     const playerName = player?.name || 'Player';
 
+    // Clear any existing disconnect timer for this player
+    const existingTimer = this.disconnectTimers.get(client.sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.disconnectTimers.delete(client.sessionId);
+    }
+
     if (consented) {
+      // Immediate removal
       this.state.players.delete(client.sessionId);
       this.currentInputs.delete(client.sessionId);
-      // Clean up any penches involving this player
       this.cleanupPenchesFor(client.sessionId);
+
+      // Check if game should end (only for immediate removal)
+      const activePlayers = Array.from(this.state.players.values()).filter(p => p.connected);
+      if (activePlayers.length === 0 && this.state.phase === 'playing') {
+        this.endGame();
+      }
     } else {
+      // Non-consented: mark disconnected, start removal timer
+      // (timer callback handles end-game check after removal)
       if (player) player.connected = false;
+
+      const timer = setTimeout(() => {
+        this.disconnectTimers.delete(client.sessionId);
+        const p = this.state.players.get(client.sessionId);
+        if (p && !p.connected) {
+          console.log(`⏰ Removing disconnected player: ${playerName} (${client.sessionId})`);
+          this.state.players.delete(client.sessionId);
+          this.currentInputs.delete(client.sessionId);
+          this.cleanupPenchesFor(client.sessionId);
+
+          // Check if game should end
+          const activePlayers = Array.from(this.state.players.values()).filter(pl => pl.connected);
+          if (activePlayers.length === 0 && this.state.phase === 'playing') {
+            this.endGame();
+          }
+        }
+      }, DISCONNECT_TIMEOUT * 1000);
+
+      this.disconnectTimers.set(client.sessionId, timer);
     }
 
     // Notify remaining players
@@ -162,16 +209,13 @@ export class PatangRoom extends Room<GameRoomState> {
     });
 
     console.log(`👤 ${playerName} left: ${client.sessionId} (consented: ${consented})`);
-
-    const activePlayers = Array.from(this.state.players.values()).filter(p => p.connected);
-    if (activePlayers.length === 0 && this.state.phase === 'playing') {
-      this.endGame();
-    }
   }
 
   onDispose() {
     if (this.physicsInterval) clearInterval(this.physicsInterval);
     if (this.countdownInterval) clearInterval(this.countdownInterval);
+    for (const timer of this.disconnectTimers.values()) clearTimeout(timer);
+    this.disconnectTimers.clear();
     console.log(`🏠 Room disposed: ${this.roomId}`);
   }
 
@@ -204,7 +248,7 @@ export class PatangRoom extends Room<GameRoomState> {
     this.state.phase = 'playing';
     this.state.timeRemaining = 180;
     this.gameTime = 0;
-    this.spawnStars(4);
+    this.spawnStars(4, true);  // stagger: randomize initial ages
     this.state.wind.speed = 1;
     this.state.wind.direction = 1;
     this.state.wind.changeTimer = 5;
@@ -267,9 +311,15 @@ export class PatangRoom extends Room<GameRoomState> {
       changeTimer: this.state.wind.changeTimer,
     };
 
-    const starsForPhysics = this.state.stars.filter(s => s.active).map(s => ({
-      id: s.id, position: { x: s.position.x, y: s.position.y }, size: s.size, active: s.active,
-    }));
+    // Build active stars for physics (single pass, no extra allocations)
+    const starsForPhysics: Array<{id: string; position: {x: number; y: number}; size: number; active: boolean}> = [];
+    for (let i = 0; i < this.state.stars.length; i++) {
+      const s = this.state.stars[i];
+      if (!s) continue;
+      if (s.active) {
+        starsForPhysics.push({ id: s.id, position: { x: s.position.x, y: s.position.y }, size: s.size, active: true });
+      }
+    }
 
     // --- Step each player's kite ---
     this.state.players.forEach((player) => {
@@ -300,7 +350,9 @@ export class PatangRoom extends Room<GameRoomState> {
           player.score += STAR_POINTS;
           this.broadcast(MessageType.STAR_COLLECTED, { starId, playerId: player.id, newScore: player.score });
           const delay = STAR_SPAWN_DELAY_MIN + this.seededRandom() * (STAR_SPAWN_DELAY_MAX - STAR_SPAWN_DELAY_MIN);
-          setTimeout(() => this.spawnStars(1), delay);
+          setTimeout(() => {
+            if (this.state.phase === 'playing') this.spawnStars(1);
+          }, delay);
         }
       }
     });
@@ -308,9 +360,32 @@ export class PatangRoom extends Room<GameRoomState> {
     // --- Progressive Pench System ---
     this.updatePenches();
 
-    // Star count
-    const activeStars = this.state.stars.filter(s => s.active).length;
+    // --- Star expiration: despawn stars that exceeded their lifetime ---
+    let activeStars = 0;
+    for (let i = 0; i < this.state.stars.length; i++) {
+      const star = this.state.stars[i];
+      if (!star) continue;
+      if (!star.active) continue;
+      const age = this.gameTime - star.spawnTime;
+      if (age >= star.lifetime) {
+        star.active = false;
+        // Schedule respawn after delay
+        const delay = STAR_SPAWN_DELAY_MIN + this.seededRandom() * (STAR_SPAWN_DELAY_MAX - STAR_SPAWN_DELAY_MIN);
+        setTimeout(() => {
+          if (this.state.phase === 'playing') this.spawnStars(1);
+        }, delay);
+      } else {
+        activeStars++;
+      }
+    }
+
+    // Ensure minimum stars on the field
     if (activeStars < 2) this.spawnStars(STAR_MAX_COUNT - activeStars);
+
+    // Periodic cleanup: remove inactive stars from array every 5 seconds
+    if (this.state.tick % (TICK_RATE * 5) === 0) {
+      this.cleanupStarArray();
+    }
   }
 
   // =====================
@@ -504,16 +579,36 @@ export class PatangRoom extends Room<GameRoomState> {
 
   // --- Stars ---
 
-  private spawnStars(count: number) {
+  private spawnStars(count: number, stagger = false) {
     for (let i = 0; i < count; i++) {
-      if (this.state.stars.filter(s => s.active).length >= STAR_MAX_COUNT) break;
+      // Count active stars without allocating a filtered array
+      let activeCount = 0;
+      for (let j = 0; j < this.state.stars.length; j++) {
+        if (this.state.stars[j]?.active) activeCount++;
+      }
+      if (activeCount >= STAR_MAX_COUNT) break;
       const star = new StarSchema();
       star.id = `star_${this.state.tick}_${i}_${Math.floor(this.seededRandom() * 10000)}`;
       star.position.x = WORLD_WIDTH * 0.15 + this.seededRandom() * WORLD_WIDTH * 0.7;
       star.position.y = WORLD_HEIGHT * 0.08 + this.seededRandom() * WORLD_HEIGHT * 0.45;
       star.size = STAR_MIN_SIZE + this.seededRandom() * (STAR_MAX_SIZE - STAR_MIN_SIZE);
       star.active = true;
+      star.lifetime = STAR_LIFETIME_MIN + this.seededRandom() * (STAR_LIFETIME_MAX - STAR_LIFETIME_MIN);
+      // Stagger: initial batch gets random age so they don't all expire at once
+      star.spawnTime = stagger
+        ? this.gameTime - this.seededRandom() * star.lifetime * 0.6
+        : this.gameTime;
       this.state.stars.push(star);
+    }
+  }
+
+  /** Remove inactive stars from the array to prevent unbounded growth */
+  private cleanupStarArray() {
+    for (let i = this.state.stars.length - 1; i >= 0; i--) {
+      const star = this.state.stars[i];
+      if (!star || !star.active) {
+        this.state.stars.splice(i, 1);
+      }
     }
   }
 

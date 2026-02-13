@@ -34,6 +34,8 @@ export class StarSchema extends Schema {
   @type(Vec2Schema) position = new Vec2Schema();
   @type('float32') size: number = 16;
   @type('boolean') active: boolean = true;
+  @type('float32') spawnTime: number = 0;     // server gameTime when spawned
+  @type('float32') lifetime: number = 12;     // seconds this star will live
 }
 
 export class WindSchema extends Schema {

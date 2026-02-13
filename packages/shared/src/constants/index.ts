@@ -36,16 +36,19 @@ export const WIND_FORCE_MULTIPLIER = 0.12;
 export const WIND_GUST_AMPLITUDE = 0.08;
 
 // --- Stars (Collectibles) ---
-export const STAR_SPAWN_DELAY_MIN = 1500;      // ms
-export const STAR_SPAWN_DELAY_MAX = 3500;      // ms
+export const STAR_SPAWN_DELAY_MIN = 1000;      // ms
+export const STAR_SPAWN_DELAY_MAX = 5000;      // ms
 export const STAR_MIN_SIZE = 12;
 export const STAR_MAX_SIZE = 22;
 export const STAR_POINTS = 10;
 export const STAR_MAX_COUNT = 6;
+export const STAR_LIFETIME_MIN = 8;            // Min seconds before despawn
+export const STAR_LIFETIME_MAX = 15;           // Max seconds (randomized per star)
 
 // --- Multiplayer ---
 export const MAX_PLAYERS_PER_ROOM = 5;
 export const ROOM_NAME = 'patang_room';
+export const DISCONNECT_TIMEOUT = 5;           // Seconds before disconnected player is removed
 export const PLAYER_COLORS = [
   { primary: '#e8403a', secondary: '#f4b942', name: 'Red-Gold' },
   { primary: '#3d8bfd', secondary: '#42f4e8', name: 'Blue-Cyan' },
@@ -54,13 +57,15 @@ export const PLAYER_COLORS = [
   { primary: '#e67e22', secondary: '#1abc9c', name: 'Amber-Teal' },
 ] as const;
 
+// --- String Rendering ---
+export const STRING_SAG_PULL = 8;              // Catenary sag when pulling
+export const STRING_SAG_GLIDE = 25;            // Catenary sag when gliding
+export const STRING_SAG_PENCH = 20;            // Sag used for pench detection (server-side average)
+
 // --- String Fighting (Pench) ---
 export const PENCH_CROSS_DISTANCE = 35;        // How close strings must be
 export const PENCH_DURATION = 2.0;             // Seconds of contact to cut
 export const PENCH_TENSION_FACTOR = 0.3;       // Pull strength affects cut speed
 
 // --- Scoring ---
-export const SCORE_STAR_COLLECT = 10;
 export const SCORE_KITE_CUT = 50;
-export const SCORE_HEIGHT_BONUS_INTERVAL = 5;  // Seconds between height bonuses
-export const SCORE_HEIGHT_MULTIPLIER = 0.1;    // Points per meter of height

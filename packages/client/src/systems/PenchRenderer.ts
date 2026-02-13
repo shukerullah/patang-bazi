@@ -134,6 +134,8 @@ export class PenchRenderer {
     let meterPos: Vec2 = { x: 0, y: 0 };
     let localIsWinning = false;
 
+    let meterAge = 0;
+
     for (const [key, pench] of this.penches) {
       pench.age += dt;
 
@@ -210,19 +212,20 @@ export class PenchRenderer {
         showMeter = true;
         meterProgress = pench.displayProgress;
         meterPos = pench.position;
+        meterAge = pench.age;
         localIsWinning = pench.winnerId === this.localPlayerId;
       }
     }
 
     // Draw tension meter near crossing point (only for local player)
     if (showMeter) {
-      this.drawTensionMeter(meterPos, meterProgress, localIsWinning);
+      this.drawTensionMeter(meterPos, meterProgress, localIsWinning, meterAge);
     } else {
       this.meterText.visible = false;
     }
   }
 
-  private drawTensionMeter(pos: Vec2, progress: number, isWinning: boolean) {
+  private drawTensionMeter(pos: Vec2, progress: number, isWinning: boolean, penchAge: number) {
     this.meterText.visible = true;
 
     const barW = 90;
@@ -273,7 +276,7 @@ export class PenchRenderer {
         this.meterText.text = '⚠️ DANGER!';
         this.meterText.style.fill = '#ff2222';
       }
-      this.meterText.scale.set(1 + Math.sin(Date.now() * 0.012) * 0.08);
+      this.meterText.scale.set(1 + Math.sin(penchAge * 12) * 0.08);
     } else if (progress > 0.4) {
       this.meterText.text = isWinning ? '💪 PULLING!' : '⚔️ PENCH!';
       this.meterText.style.fill = isWinning ? '#44cc44' : '#ff4444';

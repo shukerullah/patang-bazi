@@ -29,6 +29,10 @@ export class PlayerView {
   public playerId: string;
   public colorIndex: number;
 
+  // Respawn fade-in tracking
+  private wasAlive = true;
+  private respawnFade = 1; // 0 = invisible, 1 = fully visible
+
   constructor(
     parent: Container,
     playerId: string,
@@ -92,9 +96,23 @@ export class PlayerView {
   ) {
     if (!kite.alive) {
       this.container.visible = false;
+      this.wasAlive = false;
       return;
     }
+
+    // Respawn fade-in: if we just came back alive, start from 0
+    if (!this.wasAlive) {
+      this.respawnFade = 0;
+      this.wasAlive = true;
+    }
+    this.respawnFade = Math.min(1, this.respawnFade + 0.03); // ~0.5s fade-in at 60fps
+
     this.container.visible = true;
+
+    // Apply respawn fade to kite scale + alpha for a smooth entrance
+    const fadeScale = 0.6 + this.respawnFade * 0.4; // scale 0.6 → 1.0
+    this.kiteRenderer.container.scale.set(fadeScale);
+    this.kiteRenderer.container.alpha = this.respawnFade;
 
     // Update sub-renderers
     this.kiteRenderer.update(kite, wind);

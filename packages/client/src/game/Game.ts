@@ -22,8 +22,9 @@ import { LobbyUI } from '../ui/LobbyUI';
 import {
   WORLD_WIDTH,
   WORLD_HEIGHT,
-  TICK_RATE,
   FIXED_DT,
+  SERVER_SEND_RATE,
+  KITE_MAX_LINE_LENGTH,
   PLAYER_COLORS,
   STAR_POINTS,
   SCORE_KITE_CUT,
@@ -35,10 +36,15 @@ import {
 } from '@patang/shared';
 
 function getServerUrl(): string {
+  // Production: set VITE_SERVER_URL env var at build time
+  // e.g., VITE_SERVER_URL=wss://patang-server.onrender.com
+  const envUrl = (import.meta as any).env?.VITE_SERVER_URL;
+  if (envUrl) return envUrl;
+
+  // Development: same hostname, server port 2567
   const host = window.location.hostname;
-  const port = 2567;
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${host}:${port}`;
+  return `${protocol}://${host}:2567`;
 }
 
 // ========================
@@ -158,7 +164,7 @@ export class Game {
   private gameTime = 0;
   private inputSeq = 0;
   private inputSendAccum = 0;        // Accumulator for throttled input sending
-  private readonly INPUT_SEND_INTERVAL = 1 / TICK_RATE;  // Send at tick rate
+  private readonly INPUT_SEND_INTERVAL = 1 / SERVER_SEND_RATE;  // Send at server's receive rate (20fps)
 
   // Track last input to avoid redundant sends
   private lastSentPull = false;
@@ -177,6 +183,11 @@ export class Game {
   private hudTime!: HTMLElement;
   private hudPlayers!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
+  private hudManjhaFill!: HTMLElement;
+  private hudManjhaPct!: HTMLElement;
+  private hudManjhaBar!: HTMLElement;
+  private hudUpdateAccum = 0;
+  private lastScoreboardHtml = '';
 
   constructor(app: Application, input: InputManager, network: NetworkManager) {
     this.app = app;
@@ -249,17 +260,22 @@ export class Game {
     hud.id = 'hud';
     hud.innerHTML = `
       <style>
-        /* === TOP BAR: stats only === */
+        /* === TOP BAR: title left, stats right === */
         #hud {
           position: fixed; top: 0; left: 0; right: 0;
           padding: 12px 16px;
-          display: flex; justify-content: flex-end; align-items: flex-start;
+          display: flex; justify-content: space-between; align-items: flex-start;
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
         }
+        .game-title {
+          font-family: 'Baloo 2', cursive; font-size: 22px; font-weight: 800; color: #fff;
+          text-shadow: 0 2px 20px rgba(255,150,50,0.4); line-height: 1;
+          white-space: nowrap; flex-shrink: 0;
+        }
         .stats {
-          display: flex; gap: 6px; flex-wrap: wrap;
-          justify-content: flex-end; align-items: center;
+          display: flex; gap: 6px; flex-wrap: nowrap;
+          align-items: center;
         }
         .stat-pill {
           background: rgba(0,0,0,0.35); backdrop-filter: blur(12px);
@@ -268,7 +284,14 @@ export class Game {
           color: rgba(255,255,255,0.7); display: flex; align-items: center; gap: 4px;
           white-space: nowrap;
         }
-        .stat-pill .val { color: #ffd666; font-weight: 700; font-size: 12px; }
+        .stat-pill .val {
+          color: #ffd666; font-weight: 700; font-size: 12px;
+          display: inline-block; text-align: right;
+        }
+        .val-time { min-width: 30px; }
+        .val-alt  { min-width: 24px; }
+        .val-score { min-width: 24px; }
+        .val-wind { min-width: 52px; }
         .mute-btn {
           background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1);
           border-radius: 50%; width: 30px; height: 30px;
@@ -278,17 +301,12 @@ export class Game {
         }
         .mute-btn:hover { background: rgba(255,255,255,0.1); }
 
-        /* === BOTTOM-LEFT: branding + phase === */
+        /* === BOTTOM-LEFT: room info only === */
         #hud-bottom-left {
           position: fixed; bottom: 12px; left: 16px;
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
           display: flex; flex-direction: column; gap: 2px;
-        }
-        .game-title {
-          font-family: 'Baloo 2', cursive; font-size: 20px; font-weight: 800; color: #fff;
-          text-shadow: 0 2px 16px rgba(255,150,50,0.3); line-height: 1;
-          opacity: 0.7;
         }
         .hud-phase {
           font-size: 10px; color: rgba(255,255,255,0.35); font-weight: 500;
@@ -345,47 +363,86 @@ export class Game {
           background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.25);
           border-radius: 4px; padding: 1px 5px; color: #ffd666; font-weight: 700; font-size: 10px;
         }
+        .controls-mobile { display: none; }
+
+        /* === MANJHA (string) length bar === */
+        #manjha-bar {
+          position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
+          z-index: 10; pointer-events: none;
+          display: flex; flex-direction: column; align-items: center; gap: 5px;
+          font-family: 'Poppins', sans-serif;
+        }
+        .manjha-label {
+          font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.4);
+          letter-spacing: 0.5px; text-transform: uppercase;
+          writing-mode: vertical-rl; text-orientation: mixed;
+        }
+        .manjha-track {
+          width: 6px; height: 120px; border-radius: 3px;
+          background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08);
+          position: relative; overflow: hidden;
+          backdrop-filter: blur(8px);
+        }
+        .manjha-fill {
+          position: absolute; bottom: 0; left: 0; right: 0;
+          border-radius: 3px;
+          background: rgba(255,255,255,0.5);
+          transition: height 0.1s ease-out, background 0.3s ease;
+        }
+        .manjha-pct {
+          font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.45);
+          min-width: 24px; text-align: center;
+        }
 
         /* ====== MOBILE ====== */
         @media (max-width: 600px) {
           #hud { padding: 8px 10px; }
+          .game-title { font-size: 16px; }
           .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
           .stat-pill .val { font-size: 10px; }
+          .val-time { min-width: 26px; }
+          .val-alt  { min-width: 20px; }
+          .val-score { min-width: 20px; }
+          .val-wind { min-width: 44px; }
           .mute-btn { width: 26px; height: 26px; font-size: 12px; }
           .scoreboard { top: 40px; right: 8px; }
           .sb-row { padding: 2px 8px; font-size: 10px; }
           .sb-name { max-width: 60px; }
           #score-popup { font-size: 32px; }
-          .controls-inner { display: none; }
+          .controls-desktop { display: none; }
+          .controls-mobile { display: flex; }
           #toast-container { top: 42px; left: 8px; }
           #hud-bottom-left { bottom: 8px; left: 10px; }
-          .game-title { font-size: 15px; }
           .hud-phase { font-size: 9px; }
           .game-version { font-size: 8px; }
+          #manjha-bar { left: 6px; }
+          .manjha-track { height: 90px; width: 5px; }
+          .manjha-label { font-size: 8px; }
+          .manjha-pct { font-size: 8px; }
         }
 
         @media (max-width: 400px) {
+          .game-title { font-size: 14px; }
           .stat-pill { padding: 2px 6px; font-size: 9px; border-radius: 14px; }
           .stats { gap: 4px; }
-          .game-title { font-size: 13px; }
         }
       </style>
+      <div class="game-title">🪁 PATANG BAZI</div>
       <div class="stats">
-        <div class="stat-pill">⏱ <span class="val" id="hTime">3:00</span></div>
-        <div class="stat-pill">📍 <span class="val" id="hAlt">0</span>m</div>
-        <div class="stat-pill">⭐ <span class="val" id="hScore">0</span></div>
-        <div class="stat-pill">💨 <span class="val" id="hWind">→</span></div>
+        <div class="stat-pill">⏱ <span class="val val-time" id="hTime">3:00</span></div>
+        <div class="stat-pill">📍 <span class="val val-alt" id="hAlt">0</span>m</div>
+        <div class="stat-pill">⭐ <span class="val val-score" id="hScore">0</span></div>
+        <div class="stat-pill">💨 <span class="val val-wind" id="hWind">→</span></div>
         <button class="mute-btn" id="muteBtn">🔊</button>
       </div>
     `;
     document.body.appendChild(hud);
     this.hudEl = hud;
 
-    // Bottom-left branding
+    // Bottom-left: room info + version (NOT title — title is top-left now)
     const bottomLeft = document.createElement('div');
     bottomLeft.id = 'hud-bottom-left';
     bottomLeft.innerHTML = `
-      <div class="game-title">🪁 PATANG BAZI</div>
       <div class="hud-phase" id="hPhase"></div>
       <div class="game-version">v${GAME_VERSION}</div>
     `;
@@ -401,17 +458,34 @@ export class Game {
     popup.id = 'score-popup';
     document.body.appendChild(popup);
 
-    // Controls
+    // Controls — desktop + mobile variants
     const controls = document.createElement('div');
     controls.id = 'controls-bar';
     controls.innerHTML = `
-      <div class="controls-inner">
+      <div class="controls-inner controls-desktop">
         <span><kbd>SPACE</kbd> / <kbd>CLICK</kbd> Pull up</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Steer</span>
         <span>Cross strings to cut opponents!</span>
       </div>
+      <div class="controls-inner controls-mobile">
+        <span>Touch to pull up</span>
+        <span>👈 Left · Right 👉 to steer</span>
+        <span>Cross strings to cut!</span>
+      </div>
     `;
     document.body.appendChild(controls);
+
+    // Manjha (string length) bar — center left
+    const manjhaBar = document.createElement('div');
+    manjhaBar.id = 'manjha-bar';
+    manjhaBar.innerHTML = `
+      <div class="manjha-label">🧵</div>
+      <div class="manjha-track">
+        <div class="manjha-fill" id="manjhaFill"></div>
+      </div>
+      <div class="manjha-pct" id="manjhaPct">0%</div>
+    `;
+    document.body.appendChild(manjhaBar);
 
     this.hudHeight = document.getElementById('hAlt')!;
     this.hudScore = document.getElementById('hScore')!;
@@ -420,6 +494,12 @@ export class Game {
     this.hudTime = document.getElementById('hTime')!;
     this.hudPlayers = document.getElementById('scoreboard')!;
     this.muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
+    this.hudManjhaFill = document.getElementById('manjhaFill')!;
+    this.hudManjhaPct = document.getElementById('manjhaPct')!;
+    this.hudManjhaBar = document.getElementById('manjha-bar')!;
+
+    // Hide manjha bar until game starts
+    this.hudManjhaBar.style.display = 'none';
 
     // Mute toggle
     this.muteBtn.addEventListener('click', () => {
@@ -471,7 +551,18 @@ export class Game {
       clearTimeout(loadingTimer2);
 
       this.lobbyUI.hideLoading();
-      const msg = err instanceof Error ? err.message : String(err);
+
+      let msg = 'Unknown error';
+      if (err instanceof Error) {
+        msg = err.message;
+      } else if (typeof err === 'object' && err !== null && 'type' in err && (err as any).type === 'error') {
+        // WebSocket connection error often comes as an Event/ProgressEvent
+        msg = 'Could not reach server';
+      } else {
+        msg = String(err);
+      }
+
+      console.error('Connection error:', err);
       this.lobbyUI.showError(`Connection failed: ${msg}`);
     }
   }
@@ -635,6 +726,7 @@ export class Game {
     this.inputSendAccum = 0;
     this.cameraInitialized = false;
     this.sound.playCountdownBeep(true);
+    this.hudManjhaBar.style.display = '';
   }
 
   private onGameEnd() {
@@ -681,6 +773,7 @@ export class Game {
     this.lastSentPull = false;
     this.lastSentSteer = 0;
     this.cameraInitialized = false;
+    this.hudManjhaBar.style.display = 'none';
   }
 
   // ========================
@@ -791,12 +884,11 @@ export class Game {
           id: s.id,
           position: { x: s.position.x, y: s.position.y },
           size: s.size, active: s.active,
-          pulse: this.gameTime * 2,
         });
       });
     }
     this.starRenderer.syncStars(starList);
-    this.starRenderer.update(this.gameTime);
+    this.starRenderer.update(this.gameTime, dt);
 
     // --- Pench schema sync ---
     if (state.penches) {
@@ -830,6 +922,11 @@ export class Game {
       const view = this.playerViews.get(sessionId);
       if (!view) return;
 
+      // Fade disconnected players (they'll be removed by server after timeout)
+      const targetAlpha = !player.connected ? 0.25
+        : sessionId === this.localPlayerId ? 1.0 : 0.85;
+      view.container.alpha += (targetAlpha - view.container.alpha) * 0.1;
+
       const kite: KiteState = {
         position: { x: player.kite.position.x, y: player.kite.position.y },
         velocity: { x: player.kite.velocity.x, y: player.kite.velocity.y },
@@ -840,7 +937,7 @@ export class Game {
       const anchor = { x: player.anchorPosition.x, y: player.anchorPosition.y };
       const isLocal = sessionId === this.localPlayerId;
 
-      if (isLocal) {
+      if (isLocal && player.connected) {
         const pending = this.network.getPendingInputs(player.lastProcessedInput);
         let predicted = { ...kite };
         for (const pi of pending) {
@@ -864,35 +961,65 @@ export class Game {
     this.particleSystem.update(dt);
 
     // --- HUD ---
-    this.updateHUD(state, wind);
+    this.updateHUD(state, wind, dt);
   }
 
   // ========================
   // HUD
   // ========================
 
-  private updateHUD(state: any, wind: WindState) {
+  private updateHUD(state: any, wind: WindState, dt: number) {
     const localPlayer = state.players.get(this.localPlayerId);
 
+    // Cheap textContent updates — safe every frame
     if (localPlayer) {
       const heightM = Math.max(0, Math.round(
         (localPlayer.anchorPosition.y - localPlayer.kite.position.y) / (WORLD_HEIGHT * 0.008)
       ));
       this.hudHeight.textContent = String(heightM);
       this.hudScore.textContent = String(localPlayer.score);
-    }
 
-    const arrow = wind.direction > 0 ? '→' : '←';
-    this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
+      // Manjha (string) length bar
+      const dx = localPlayer.kite.position.x - localPlayer.anchorPosition.x;
+      const dy = localPlayer.kite.position.y - localPlayer.anchorPosition.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const ratio = Math.min(1, dist / KITE_MAX_LINE_LENGTH);
+      const pct = Math.round(ratio * 100);
+
+      this.hudManjhaFill.style.height = `${pct}%`;
+      this.hudManjhaPct.textContent = `${pct}%`;
+
+      // Color: white → yellow → orange → red as it nears max
+      let manjhaColor: string;
+      if (ratio < 0.6) {
+        manjhaColor = 'rgba(255,255,255,0.5)';
+      } else if (ratio < 0.8) {
+        manjhaColor = '#ffd666';
+      } else if (ratio < 0.92) {
+        manjhaColor = '#ff8833';
+      } else {
+        manjhaColor = '#ff4444';
+      }
+      this.hudManjhaFill.style.background = manjhaColor;
+      this.hudManjhaPct.style.color = ratio >= 0.6 ? manjhaColor : 'rgba(255,255,255,0.45)';
+    }
 
     const secs = Math.max(0, Math.ceil(state.timeRemaining));
     this.hudTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+
+    // Throttle expensive updates (~4fps)
+    this.hudUpdateAccum += dt;
+    if (this.hudUpdateAccum < 0.25) return;
+    this.hudUpdateAccum = 0;
+
+    const arrow = wind.direction > 0 ? '→' : '←';
+    this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
 
     this.hudPhase.textContent = state.phase === 'playing'
       ? `Room: ${this.network.roomId?.slice(0, 6)} · ${state.players.size} players`
       : state.phase;
 
-    // Scoreboard
+    // Scoreboard — only rewrite DOM when content changes
     const rows: string[] = [];
     const sorted = Array.from(state.players.entries() as Iterable<[string, any]>)
       .sort(([, a]: [string, any], [, b]: [string, any]) => b.score - a.score);
@@ -900,29 +1027,37 @@ export class Game {
       const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
       const isLocal = id === this.localPlayerId;
       const isDead = !p.kite.alive;
+      // Escape HTML in player name (defense-in-depth, server also sanitizes)
+      const safeName = (p.name || 'Player').replace(/[<>&"']/g, (c: string) =>
+        ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] || c
+      );
       rows.push(`
         <div class="sb-row${isLocal ? ' local' : ''}${isDead ? ' dead' : ''}">
           <div class="sb-dot" style="background:${palette.primary}"></div>
-          <span class="sb-name">${p.name || 'Player'}${isDead ? ' ✂️' : ''}</span>
+          <span class="sb-name">${safeName}${isDead ? ' ✂️' : ''}</span>
           <span class="sb-score">${p.score}</span>
         </div>
       `);
     }
-    this.hudPlayers.innerHTML = rows.join('');
+    const html = rows.join('');
+    if (html !== this.lastScoreboardHtml) {
+      this.lastScoreboardHtml = html;
+      this.hudPlayers.innerHTML = html;
+    }
   }
 
   // ========================
   // UTILS
   // ========================
 
-  private scorePopupTimer = 0;
+  private scorePopupTimer: ReturnType<typeof setTimeout> | null = null;
 
   private showScorePopup(text: string, isCut = false) {
     const el = document.getElementById('score-popup')!;
     el.textContent = text;
     el.className = 'show' + (isCut ? ' cut' : '');
-    clearTimeout(this.scorePopupTimer as unknown as number);
-    this.scorePopupTimer = window.setTimeout(() => {
+    if (this.scorePopupTimer) clearTimeout(this.scorePopupTimer);
+    this.scorePopupTimer = setTimeout(() => {
       el.className = '';
     }, 1500);
   }
