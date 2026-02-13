@@ -1,0 +1,8 @@
+[build]
+  base = "/"
+  command = "pnpm install && pnpm --filter @patang/shared run build && pnpm --filter @patang/client run build"
+  publish = "packages/client/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  PNPM_VERSION = "9.15.0"
