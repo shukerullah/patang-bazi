@@ -23,6 +23,10 @@ export class NetworkManager {
   private listeners = new Map<string, Set<Callback>>();
   private pendingInputs: PlayerInput[] = [];
 
+  // Ping measurement (client-side only — zero server cost)
+  private inputTimestamps = new Map<number, number>(); // seq → performance.now()
+  private _ping = 0;  // smoothed ping in ms
+
   // --- Connection ---
 
   async connect(serverUrl: string, options: RoomJoinOptions): Promise<string> {
@@ -78,11 +82,35 @@ export class NetworkManager {
     if (this.pendingInputs.length > 120) {
       this.pendingInputs = this.pendingInputs.slice(-60);
     }
+    // Record send time for ping measurement
+    this.inputTimestamps.set(input.seq, performance.now());
+    // Cap timestamps map too
+    if (this.inputTimestamps.size > 150) {
+      const cutoff = input.seq - 100;
+      for (const k of this.inputTimestamps.keys()) {
+        if (k < cutoff) this.inputTimestamps.delete(k);
+      }
+    }
     this._room.send(MessageType.INPUT, input);
   }
 
   sendReady(name: string) {
     this._room?.send(MessageType.PLAYER_READY, { name });
+  }
+
+  /** Current smoothed ping in ms (client-side measurement, no server cost) */
+  get ping(): number { return Math.round(this._ping); }
+
+  /** Call when server acks an input seq (from state.lastProcessedInput) */
+  updatePing(ackedSeq: number) {
+    const sentAt = this.inputTimestamps.get(ackedSeq);
+    if (sentAt) {
+      const rtt = performance.now() - sentAt;
+      // Exponential moving average for stability
+      this._ping = this._ping === 0 ? rtt : this._ping * 0.8 + rtt * 0.2;
+      // Clean up old timestamps
+      this.inputTimestamps.delete(ackedSeq);
+    }
   }
 
   /** Get inputs server hasn't processed yet (for reconciliation) */

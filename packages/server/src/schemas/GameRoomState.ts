@@ -3,6 +3,7 @@
 // ============================================
 
 import { Schema, type, MapSchema, ArraySchema } from '@colyseus/schema';
+import { ROUND_DURATION } from '@patang/shared';
 
 export class Vec2Schema extends Schema {
   @type('float32') x: number = 0;
@@ -62,6 +63,6 @@ export class GameRoomState extends Schema {
   @type([StarSchema]) stars = new ArraySchema<StarSchema>();
   @type([PenchSchema]) penches = new ArraySchema<PenchSchema>();
   @type('uint32') tick: number = 0;
-  @type('float32') timeRemaining: number = 180;
+  @type('float32') timeRemaining: number = ROUND_DURATION;
   @type('uint8') countdown: number = 0;
 }

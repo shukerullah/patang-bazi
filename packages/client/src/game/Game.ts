@@ -178,6 +178,7 @@ export class Game {
   // HUD refs
   private hudWind!: HTMLElement;
   private hudPhase!: HTMLElement;
+  private hudPing!: HTMLElement;
   private hudTime!: HTMLElement;
   private hudPlayers!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
@@ -308,6 +309,13 @@ export class Game {
           font-size: 10px; color: rgba(255,255,255,0.35); font-weight: 500;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .hud-ping {
+          font-size: 9px; font-weight: 600; font-family: 'Poppins', monospace;
+          color: rgba(255,255,255,0.3);
+        }
+        .hud-ping.good { color: rgba(100,220,100,0.5); }
+        .hud-ping.ok { color: rgba(255,214,102,0.5); }
+        .hud-ping.bad { color: rgba(255,100,100,0.5); }
         .game-version {
           font-size: 9px; color: rgba(255,255,255,0.2); font-weight: 400;
           letter-spacing: 0.5px;
@@ -408,6 +416,7 @@ export class Game {
           #toast-container { top: 42px; left: 8px; }
           #hud-bottom-left { bottom: 8px; left: 10px; }
           .hud-phase { font-size: 9px; }
+          .hud-ping { font-size: 8px; }
           .game-version { font-size: 8px; }
           #manjha-bar { left: 6px; }
           .manjha-track { height: 90px; width: 5px; }
@@ -436,6 +445,7 @@ export class Game {
     bottomLeft.id = 'hud-bottom-left';
     bottomLeft.innerHTML = `
       <div class="hud-phase" id="hPhase"></div>
+      <div class="hud-ping" id="hPing"></div>
       <div class="game-version">v${GAME_VERSION}</div>
     `;
     document.body.appendChild(bottomLeft);
@@ -481,6 +491,7 @@ export class Game {
 
     this.hudWind = document.getElementById('hWind')!;
     this.hudPhase = document.getElementById('hPhase')!;
+    this.hudPing = document.getElementById('hPing')!;
     this.hudTime = document.getElementById('hTime')!;
     this.hudPlayers = document.getElementById('scoreboard')!;
     this.muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
@@ -935,6 +946,8 @@ export class Game {
       const isLocal = sessionId === this.localPlayerId;
 
       if (isLocal && player.connected) {
+        // Measure ping from input ack (client-side only, zero server cost)
+        this.network.updatePing(player.lastProcessedInput);
         const pending = this.network.getPendingInputs(player.lastProcessedInput);
         let predicted = { ...kite };
         for (const pi of pending) {
@@ -1005,6 +1018,13 @@ export class Game {
 
     const arrow = wind.direction > 0 ? '→' : '←';
     this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
+
+    // Ping display (client-side measurement)
+    const ping = this.network.ping;
+    if (ping > 0) {
+      this.hudPing.textContent = `${ping}ms`;
+      this.hudPing.className = ping < 80 ? 'hud-ping good' : ping < 150 ? 'hud-ping ok' : 'hud-ping bad';
+    }
 
     this.hudPhase.textContent = state.phase === 'playing'
       ? `Room: ${this.network.roomId?.slice(0, 6)} · ${state.players.size} players`

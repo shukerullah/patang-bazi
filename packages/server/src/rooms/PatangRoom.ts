@@ -37,6 +37,10 @@ import {
   PENCH_DURATION,
   PENCH_TENSION_FACTOR,
   DISCONNECT_TIMEOUT,
+  ROUND_DURATION,
+  MIN_PLAYERS_TO_START,
+  COUNTDOWN_SECONDS,
+  KITE_RESPAWN_DELAY,
   MessageType,
   stepKite,
   checkPench,
@@ -81,9 +85,6 @@ export class PatangRoom extends Room<GameRoomState> {
 
   // Disconnect cleanup timers (sessionId → timeout)
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  // Min players to start the first game
-  private static MIN_PLAYERS_TO_START = 2;
 
   onCreate(_options: RoomJoinOptions) {
     this.setState(new GameRoomState());
@@ -224,7 +225,7 @@ export class PatangRoom extends Room<GameRoomState> {
   private checkAllReady() {
     // Only called when phase === 'waiting'
     const players = Array.from(this.state.players.values());
-    if (players.length < PatangRoom.MIN_PLAYERS_TO_START) return; // Min 1 for testing, 2 for prod
+    if (players.length < MIN_PLAYERS_TO_START) return;
     if (!players.every(p => p.ready)) return;
     this.startCountdown();
   }
@@ -233,7 +234,7 @@ export class PatangRoom extends Room<GameRoomState> {
     if (this.state.phase !== 'waiting') return; // Guard: only from waiting
 
     this.state.phase = 'countdown';
-    this.state.countdown = 3;
+    this.state.countdown = COUNTDOWN_SECONDS;
 
     this.countdownInterval = setInterval(() => {
       this.state.countdown--;
@@ -246,7 +247,7 @@ export class PatangRoom extends Room<GameRoomState> {
 
   private startGame() {
     this.state.phase = 'playing';
-    this.state.timeRemaining = 180;
+    this.state.timeRemaining = ROUND_DURATION;
     this.gameTime = 0;
     this.spawnStars(4, true);  // stagger: randomize initial ages
     this.state.wind.speed = 1;
@@ -312,7 +313,7 @@ export class PatangRoom extends Room<GameRoomState> {
     };
 
     // Build active stars for physics (single pass, no extra allocations)
-    const starsForPhysics: Array<{ id: string; position: { x: number; y: number }; size: number; active: boolean }> = [];
+    const starsForPhysics: Array<{id: string; position: {x: number; y: number}; size: number; active: boolean}> = [];
     for (let i = 0; i < this.state.stars.length; i++) {
       const s = this.state.stars[i];
       if (!s) continue;
@@ -535,7 +536,7 @@ export class PatangRoom extends Room<GameRoomState> {
     // Clean up pench
     this.endPench(key);
 
-    // Respawn loser after 3 seconds
+    // Respawn loser after delay
     setTimeout(() => {
       if (this.state.phase !== 'playing') return;
       const player = this.state.players.get(loser.id);
@@ -545,7 +546,7 @@ export class PatangRoom extends Room<GameRoomState> {
       player.kite.position.y = WORLD_HEIGHT * 0.65;
       player.kite.velocity.x = 0;
       player.kite.velocity.y = 0;
-    }, 3000);
+    }, KITE_RESPAWN_DELAY);
 
     console.log(`✂️ ${winner.name} cut ${loser.name}'s kite!`);
   }

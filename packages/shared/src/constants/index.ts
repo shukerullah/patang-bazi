@@ -69,3 +69,9 @@ export const PENCH_TENSION_FACTOR = 0.3;       // Pull strength affects cut spee
 
 // --- Scoring ---
 export const SCORE_KITE_CUT = 50;
+
+// --- Game Rules ---
+export const ROUND_DURATION = 180;               // Seconds per round
+export const MIN_PLAYERS_TO_START = 2;           // Minimum players to begin countdown
+export const COUNTDOWN_SECONDS = 3;              // Countdown before round starts
+export const KITE_RESPAWN_DELAY = 3000;          // ms before cut kite respawns
