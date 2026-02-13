@@ -33,6 +33,7 @@ import {
   type PlayerInput,
   type KiteState,
   type WindState,
+  type GameOverMessage,
 } from '@patang/shared';
 
 function getServerUrl(): string {
@@ -187,6 +188,7 @@ export class Game {
   private hudManjhaBar!: HTMLElement;
   private hudUpdateAccum = 0;
   private lastScoreboardHtml = '';
+  private pendingGameOver: GameOverMessage | null = null;
 
   constructor(app: Application, input: InputManager, network: NetworkManager) {
     this.app = app;
@@ -663,6 +665,11 @@ export class Game {
       this.toasts.show(`${msg.name} left`, undefined, 2500);
     });
 
+    // Game over — capture rankings from server message (includes bots)
+    this.network.on('gameOver', (msg: GameOverMessage) => {
+      this.pendingGameOver = msg;
+    });
+
     this.network.on('disconnected', () => {
       this.cleanupGameState();
       this.lobbyUI.showError('Disconnected from server');
@@ -731,28 +738,43 @@ export class Game {
   }
 
   private onGameEnd() {
-    const state = this.network.state;
-    if (!state) return;
-
-    // Build structured player results
-    const players: Array<{
-      name: string; score: number; color: string;
-      isLocal: boolean; cuts: number;
-    }> = [];
-
-    for (const [id, p] of state.players.entries() as Iterable<[string, any]>) {
-      const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
-      players.push({
-        name: p.name || 'Player',
-        score: p.score,
-        color: palette.primary,
-        isLocal: id === this.localPlayerId,
-        cuts: p.cuts ?? 0,
+    // Use rankings from GAME_OVER message (built BEFORE bots are removed)
+    const msg = this.pendingGameOver;
+    if (!msg || !msg.rankings) {
+      // Fallback: read from state (may miss bots if already removed)
+      const state = this.network.state;
+      if (!state) return;
+      const fallbackPlayers: Array<{
+        name: string; score: number; color: string;
+        isLocal: boolean; cuts: number;
+      }> = [];
+      for (const [id, p] of state.players.entries() as Iterable<[string, any]>) {
+        const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
+        fallbackPlayers.push({
+          name: p.name || 'Player',
+          score: p.score,
+          color: palette.primary,
+          isLocal: id === this.localPlayerId,
+          cuts: p.cuts ?? 0,
+        });
+      }
+      this.lobbyUI.showResults(fallbackPlayers);
+    } else {
+      // Primary path: use server-sent rankings (includes ALL players incl. bots)
+      const players = msg.rankings.map(r => {
+        const palette = PLAYER_COLORS[r.colorIndex % PLAYER_COLORS.length];
+        return {
+          name: r.name,
+          score: r.score,
+          color: palette.primary,
+          isLocal: r.playerId === this.localPlayerId,
+          cuts: r.kiteCuts ?? 0,
+        };
       });
+      this.lobbyUI.showResults(players);
     }
 
-    // Show polished results overlay
-    this.lobbyUI.showResults(players);
+    this.pendingGameOver = null;
 
     // Wire up "Play Again" → disconnect, cleanup, show lobby
     this.lobbyUI.onPlayAgain(async () => {
@@ -775,6 +797,7 @@ export class Game {
 
     // Reset game state
     this.localPlayerId = null;
+    this.pendingGameOver = null;
     this.gameTime = 0;
     this.inputSeq = 0;
     this.inputSendAccum = 0;

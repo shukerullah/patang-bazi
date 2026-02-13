@@ -127,17 +127,21 @@ export class BotController {
     const stars = world.stars.filter(s => s.active);
     if (stars.length === 0) return null;
 
-    // Sort by distance
-    const sorted = stars
+    // Filter to stars the kite can actually reach (within line length from anchor)
+    // Use 90% of max line length to avoid chasing stars right at the edge
+    const maxReach = KITE_MAX_LINE_LENGTH * 0.9;
+    const reachable = stars
+      .filter(s => {
+        const dxAnchor = s.x - world.anchorX;
+        const dyAnchor = s.y - world.anchorY;
+        return Math.sqrt(dxAnchor * dxAnchor + dyAnchor * dyAnchor) < maxReach;
+      })
       .map(s => ({
         ...s,
         dist: Math.sqrt((s.x - world.kiteX) ** 2 + (s.y - world.kiteY) ** 2),
       }))
       .sort((a, b) => a.dist - b.dist);
 
-    // Only seek stars within reasonable range
-    const seekRange = KITE_MAX_LINE_LENGTH * 0.6;
-    const reachable = sorted.filter(s => s.dist < seekRange);
     if (reachable.length === 0) return null;
 
     // 30% chance to ignore closest star (pick 2nd if available) — human-like imperfection

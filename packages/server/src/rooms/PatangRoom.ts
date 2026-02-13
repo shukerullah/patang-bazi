@@ -363,7 +363,7 @@ export class PatangRoom extends Room<GameRoomState> {
 
     const rankings = Array.from(this.state.players.values())
       .sort((a, b) => b.score - a.score)
-      .map(p => ({ playerId: p.id, name: p.name, score: p.score, kiteCuts: p.cuts }));
+      .map(p => ({ playerId: p.id, name: p.name, score: p.score, kiteCuts: p.cuts, colorIndex: p.colorIndex }));
 
     this.broadcast(MessageType.GAME_OVER, { rankings });
 
