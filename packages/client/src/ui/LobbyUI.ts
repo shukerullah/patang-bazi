@@ -232,11 +232,12 @@ export class LobbyUI {
       <div class="lobby-countdown" id="lobby-countdown">3</div>
       <div class="lobby-instructions" id="lobby-instructions">
         <div class="lobby-inst-desktop">
-          <div><kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up</div>
-          <div><kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!</div>
+          <div>Click & hold to pull string & fly up</div>
+          <div>Left side to steer left · Right side to steer right</div>
+          <div>Catch ⭐ stars · Cut opponents' strings!</div>
         </div>
         <div class="lobby-inst-mobile">
-          <div>Touch anywhere to pull string & fly up</div>
+          <div>Touch & hold to pull string & fly up</div>
           <div>Left side to steer left · Right side to steer right</div>
           <div>Catch ⭐ stars · Cut opponents' strings!</div>
         </div>
@@ -257,10 +258,15 @@ export class LobbyUI {
     this.loadingEl = document.getElementById('lobby-loading') as HTMLDivElement;
     this.instructionsEl = document.getElementById('lobby-instructions') as HTMLDivElement;
 
-    // Random default name
-    const names = ['Ustaad', 'Patangbaaz', 'Sultan', 'Dorbaaz', 'Shikari', 'Khiladi', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
-    this.nameInput.value = names[Math.floor(Math.random() * names.length)] +
-      Math.floor(Math.random() * 99);
+    // Load saved name or generate random default
+    const savedName = this.loadName();
+    if (savedName) {
+      this.nameInput.value = savedName;
+    } else {
+      const names = ['Ustaad', 'Patangbaaz', 'Sultan', 'Dorbaaz', 'Shikari', 'Khiladi', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
+      this.nameInput.value = names[Math.floor(Math.random() * names.length)] +
+        Math.floor(Math.random() * 99);
+    }
 
     this.connectBtn.addEventListener('click', () => this.doConnect());
     this.nameInput.addEventListener('keydown', (e) => {
@@ -273,9 +279,19 @@ export class LobbyUI {
 
   private doConnect() {
     const name = this.nameInput.value.trim() || 'Player';
+    this.saveName(name);
     this.connectBtn.disabled = true;
     this.nameInput.disabled = true;
     this.onConnect(name);
+  }
+
+  /** Persist player name across sessions */
+  private saveName(name: string) {
+    try { localStorage.setItem('patang_name', name); } catch { /* private browsing */ }
+  }
+
+  private loadName(): string | null {
+    try { return localStorage.getItem('patang_name'); } catch { return null; }
   }
 
   setStatus(text: string, isError = false) {

@@ -261,7 +261,7 @@ export class Game {
     hud.id = 'hud';
     hud.innerHTML = `
       <style>
-        /* === TOP BAR: title left, stats right === */
+        /* === TOP BAR: 3-column layout === */
         #hud {
           position: fixed; top: 0; left: 0; right: 0;
           padding: 12px 16px;
@@ -269,14 +269,16 @@ export class Game {
           pointer-events: none; z-index: 10;
           font-family: 'Poppins', sans-serif;
         }
-        .game-title {
-          font-family: 'Baloo 2', cursive; font-size: 22px; font-weight: 800; color: #fff;
-          text-shadow: 0 2px 20px rgba(255,150,50,0.4); line-height: 1;
-          white-space: nowrap; flex-shrink: 0;
+        .hud-left {
+          display: flex; gap: 6px; align-items: center;
+          flex-shrink: 0;
         }
-        .stats {
-          display: flex; gap: 6px; flex-wrap: nowrap;
-          align-items: center;
+        .hud-center {
+          position: absolute; left: 50%; top: 12px;
+          transform: translateX(-50%);
+        }
+        .hud-right {
+          flex-shrink: 0;
         }
         .stat-pill {
           background: rgba(0,0,0,0.35); backdrop-filter: blur(12px);
@@ -334,9 +336,8 @@ export class Game {
         #score-popup.show { opacity: 1; transform: translate(-50%, -60%); }
         #score-popup.cut { color: #ff4444; text-shadow: 0 4px 30px rgba(255,50,50,0.6); }
 
-        /* Scoreboard */
+        /* Scoreboard — top right, directly in the hud-right area */
         .scoreboard {
-          position: fixed; top: 48px; right: 12px; z-index: 10; pointer-events: none;
           display: flex; flex-direction: column; gap: 3px;
         }
         .sb-row {
@@ -403,13 +404,12 @@ export class Game {
         /* ====== MOBILE ====== */
         @media (max-width: 600px) {
           #hud { padding: 8px 10px; }
-          .game-title { font-size: 16px; }
           .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
           .stat-pill .val { font-size: 10px; }
           .val-time { min-width: 26px; }
           .val-wind { min-width: 44px; }
           .mute-btn { width: 26px; height: 26px; font-size: 12px; }
-          .scoreboard { top: 40px; right: 8px; }
+          .hud-center { top: 8px; }
           .sb-row { padding: 2px 8px; font-size: 10px; }
           .sb-name { max-width: 60px; }
           #score-popup { font-size: 32px; }
@@ -427,22 +427,24 @@ export class Game {
         }
 
         @media (max-width: 400px) {
-          .game-title { font-size: 14px; }
           .stat-pill { padding: 2px 6px; font-size: 9px; border-radius: 14px; }
-          .stats { gap: 4px; }
         }
       </style>
-      <div class="game-title">🪁 PATANG BAZI</div>
-      <div class="stats">
-        <div class="stat-pill">⏱ <span class="val val-time" id="hTime">3:00</span></div>
-        <div class="stat-pill">💨 <span class="val val-wind" id="hWind">→</span></div>
+      <div class="hud-left">
         <button class="mute-btn" id="muteBtn">🔊</button>
+        <div class="stat-pill">⏱ <span class="val val-time" id="hTime">3:00</span></div>
+      </div>
+      <div class="hud-center">
+        <div class="stat-pill">💨 <span class="val val-wind" id="hWind">→</span></div>
+      </div>
+      <div class="hud-right">
+        <div class="scoreboard" id="scoreboard"></div>
       </div>
     `;
     document.body.appendChild(hud);
     this.hudEl = hud;
 
-    // Bottom-left: room info + version (NOT title — title is top-left now)
+    // Bottom-left: room info + version
     const bottomLeft = document.createElement('div');
     bottomLeft.id = 'hud-bottom-left';
     bottomLeft.innerHTML = `
@@ -451,11 +453,6 @@ export class Game {
       <div class="game-version">v${GAME_VERSION}</div>
     `;
     document.body.appendChild(bottomLeft);
-
-    const sb = document.createElement('div');
-    sb.className = 'scoreboard';
-    sb.id = 'scoreboard';
-    document.body.appendChild(sb);
 
     // Score popup
     const popup = document.createElement('div');
@@ -467,12 +464,12 @@ export class Game {
     controls.id = 'controls-bar';
     controls.innerHTML = `
       <div class="controls-inner controls-desktop">
-        <span><kbd>SPACE</kbd> / <kbd>CLICK</kbd> Pull up</span>
-        <span><kbd>←</kbd> <kbd>→</kbd> Steer</span>
+        <span>Click & hold to pull up</span>
+        <span>👈 Left side · Right side 👉 to steer</span>
         <span>Cross strings to cut opponents!</span>
       </div>
       <div class="controls-inner controls-mobile">
-        <span>Touch to pull up</span>
+        <span>Touch & hold to pull up</span>
         <span>👈 Left · Right 👉 to steer</span>
         <span>Cross strings to cut!</span>
       </div>
