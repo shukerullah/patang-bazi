@@ -24,6 +24,7 @@ import {
   WORLD_HEIGHT,
   FIXED_DT,
   SERVER_SEND_RATE,
+  KITE_MAX_LINE_LENGTH,
   PLAYER_COLORS,
   STAR_POINTS,
   SCORE_KITE_CUT,
@@ -182,6 +183,9 @@ export class Game {
   private hudTime!: HTMLElement;
   private hudPlayers!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
+  private hudManjhaFill!: HTMLElement;
+  private hudManjhaPct!: HTMLElement;
+  private hudManjhaBar!: HTMLElement;
   private hudUpdateAccum = 0;
   private lastScoreboardHtml = '';
 
@@ -361,6 +365,35 @@ export class Game {
         }
         .controls-mobile { display: none; }
 
+        /* === MANJHA (string) length bar === */
+        #manjha-bar {
+          position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
+          z-index: 10; pointer-events: none;
+          display: flex; flex-direction: column; align-items: center; gap: 5px;
+          font-family: 'Poppins', sans-serif;
+        }
+        .manjha-label {
+          font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.4);
+          letter-spacing: 0.5px; text-transform: uppercase;
+          writing-mode: vertical-rl; text-orientation: mixed;
+        }
+        .manjha-track {
+          width: 6px; height: 120px; border-radius: 3px;
+          background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08);
+          position: relative; overflow: hidden;
+          backdrop-filter: blur(8px);
+        }
+        .manjha-fill {
+          position: absolute; bottom: 0; left: 0; right: 0;
+          border-radius: 3px;
+          background: rgba(255,255,255,0.5);
+          transition: height 0.1s ease-out, background 0.3s ease;
+        }
+        .manjha-pct {
+          font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.45);
+          min-width: 24px; text-align: center;
+        }
+
         /* ====== MOBILE ====== */
         @media (max-width: 600px) {
           #hud { padding: 8px 10px; }
@@ -382,6 +415,10 @@ export class Game {
           #hud-bottom-left { bottom: 8px; left: 10px; }
           .hud-phase { font-size: 9px; }
           .game-version { font-size: 8px; }
+          #manjha-bar { left: 6px; }
+          .manjha-track { height: 90px; width: 5px; }
+          .manjha-label { font-size: 8px; }
+          .manjha-pct { font-size: 8px; }
         }
 
         @media (max-width: 400px) {
@@ -438,6 +475,18 @@ export class Game {
     `;
     document.body.appendChild(controls);
 
+    // Manjha (string length) bar — center left
+    const manjhaBar = document.createElement('div');
+    manjhaBar.id = 'manjha-bar';
+    manjhaBar.innerHTML = `
+      <div class="manjha-label">🧵</div>
+      <div class="manjha-track">
+        <div class="manjha-fill" id="manjhaFill"></div>
+      </div>
+      <div class="manjha-pct" id="manjhaPct">0%</div>
+    `;
+    document.body.appendChild(manjhaBar);
+
     this.hudHeight = document.getElementById('hAlt')!;
     this.hudScore = document.getElementById('hScore')!;
     this.hudWind = document.getElementById('hWind')!;
@@ -445,6 +494,12 @@ export class Game {
     this.hudTime = document.getElementById('hTime')!;
     this.hudPlayers = document.getElementById('scoreboard')!;
     this.muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
+    this.hudManjhaFill = document.getElementById('manjhaFill')!;
+    this.hudManjhaPct = document.getElementById('manjhaPct')!;
+    this.hudManjhaBar = document.getElementById('manjha-bar')!;
+
+    // Hide manjha bar until game starts
+    this.hudManjhaBar.style.display = 'none';
 
     // Mute toggle
     this.muteBtn.addEventListener('click', () => {
@@ -671,6 +726,7 @@ export class Game {
     this.inputSendAccum = 0;
     this.cameraInitialized = false;
     this.sound.playCountdownBeep(true);
+    this.hudManjhaBar.style.display = '';
   }
 
   private onGameEnd() {
@@ -717,6 +773,7 @@ export class Game {
     this.lastSentPull = false;
     this.lastSentSteer = 0;
     this.cameraInitialized = false;
+    this.hudManjhaBar.style.display = 'none';
   }
 
   // ========================
@@ -921,6 +978,30 @@ export class Game {
       ));
       this.hudHeight.textContent = String(heightM);
       this.hudScore.textContent = String(localPlayer.score);
+
+      // Manjha (string) length bar
+      const dx = localPlayer.kite.position.x - localPlayer.anchorPosition.x;
+      const dy = localPlayer.kite.position.y - localPlayer.anchorPosition.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const ratio = Math.min(1, dist / KITE_MAX_LINE_LENGTH);
+      const pct = Math.round(ratio * 100);
+
+      this.hudManjhaFill.style.height = `${pct}%`;
+      this.hudManjhaPct.textContent = `${pct}%`;
+
+      // Color: white → yellow → orange → red as it nears max
+      let manjhaColor: string;
+      if (ratio < 0.6) {
+        manjhaColor = 'rgba(255,255,255,0.5)';
+      } else if (ratio < 0.8) {
+        manjhaColor = '#ffd666';
+      } else if (ratio < 0.92) {
+        manjhaColor = '#ff8833';
+      } else {
+        manjhaColor = '#ff4444';
+      }
+      this.hudManjhaFill.style.background = manjhaColor;
+      this.hudManjhaPct.style.color = ratio >= 0.6 ? manjhaColor : 'rgba(255,255,255,0.45)';
     }
 
     const secs = Math.max(0, Math.ceil(state.timeRemaining));
