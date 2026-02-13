@@ -75,3 +75,11 @@ export const ROUND_DURATION = 180;               // Seconds per round
 export const MIN_PLAYERS_TO_START = 2;           // Minimum players to begin countdown
 export const COUNTDOWN_SECONDS = 3;              // Countdown before round starts
 export const KITE_RESPAWN_DELAY = 3000;          // ms before cut kite respawns
+
+// --- Bot ---
+export const BOT_SPAWN_DELAY = 15000;            // ms waiting alone before bot joins
+export const BOT_NAME_POOL = [
+  'Ustaad', 'Patangbaaz', 'Dorbaaz', 'Shikari', 'Hawker',
+  'Sultan', 'Pilot', 'Falcon', 'Baaz', 'Cheel',
+  'Shehbaz', 'Teetar', 'Shaheen', 'Kargas', 'Bulbul',
+] as const;

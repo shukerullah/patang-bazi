@@ -14,6 +14,7 @@ const { WebSocketTransport } = wsTransport;
 const { monitor } = colyseusMonitor;
 import { PatangRoom } from './rooms/PatangRoom.js';
 import { ROOM_NAME } from '@patang/shared';
+import apiRoutes from './api/routes.js';
 
 const PORT = Number(process.env.PORT) || 2567;
 
@@ -23,6 +24,9 @@ async function main() {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() });
   });
+
+  // API endpoints
+  app.use('/api', apiRoutes);
 
   if (process.env.NODE_ENV !== 'production') {
     app.use('/monitor', monitor());
@@ -41,6 +45,7 @@ async function main() {
 
   console.log(`🪁 Patang Bazi Server`);
   console.log(`   → WebSocket: ws://localhost:${PORT}`);
+  console.log(`   → API:       http://localhost:${PORT}/api/rooms`);
   console.log(`   → Monitor:   http://localhost:${PORT}/monitor`);
   console.log(`   → Health:    http://localhost:${PORT}/health`);
 }

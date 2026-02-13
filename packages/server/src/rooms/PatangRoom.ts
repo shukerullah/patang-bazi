@@ -41,12 +41,14 @@ import {
   MIN_PLAYERS_TO_START,
   COUNTDOWN_SECONDS,
   KITE_RESPAWN_DELAY,
+  BOT_SPAWN_DELAY,
   MessageType,
   stepKite,
   checkPench,
   type PlayerInput,
   type RoomJoinOptions,
 } from '@patang/shared';
+import { BotManager } from '../bot/BotManager.js';
 
 // Key for a pench pair (always sorted so A < B)
 function penchKey(idA: string, idB: string): string {
@@ -86,6 +88,10 @@ export class PatangRoom extends Room<GameRoomState> {
   // Disconnect cleanup timers (sessionId → timeout)
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  // Bot system
+  private botManager = new BotManager();
+  private botSpawnTimer: ReturnType<typeof setTimeout> | null = null;
+
   onCreate(_options: RoomJoinOptions) {
     this.setState(new GameRoomState());
     this.maxClients = MAX_PLAYERS_PER_ROOM;
@@ -107,6 +113,10 @@ export class PatangRoom extends Room<GameRoomState> {
       // Only trigger countdown if we're still in waiting phase
       if (this.state.phase === 'waiting') {
         this.checkAllReady();
+        // If still waiting (not enough players), schedule bot spawn
+        if (this.state.phase === 'waiting') {
+          this.maybeScheduleBotSpawn();
+        }
       }
       // If game is already playing, player is already hot-joined (see onJoin)
     });
@@ -116,6 +126,11 @@ export class PatangRoom extends Room<GameRoomState> {
 
   onJoin(client: any, options: RoomJoinOptions) {
     const isHotJoin = this.state.phase === 'playing' || this.state.phase === 'countdown';
+
+    // Cancel bot spawn if a real player joins during waiting
+    if (this.state.phase === 'waiting') {
+      this.cancelBotSpawnTimer();
+    }
 
     const player = new PlayerSchema();
     player.id = client.sessionId;
@@ -173,15 +188,19 @@ export class PatangRoom extends Room<GameRoomState> {
       this.currentInputs.delete(client.sessionId);
       this.cleanupPenchesFor(client.sessionId);
 
-      // Check if game should end (only for immediate removal)
-      const activePlayers = Array.from(this.state.players.values()).filter(p => p.connected);
-      if (activePlayers.length === 0 && this.state.phase === 'playing') {
+      // End game if no real players remain (bots don't count)
+      if (this.getRealPlayerCount() === 0 && this.state.phase === 'playing') {
         this.endGame();
       }
     } else {
       // Non-consented: mark disconnected, start removal timer
-      // (timer callback handles end-game check after removal)
       if (player) player.connected = false;
+
+      // Check immediately — if no real players connected, end now
+      if (this.getRealPlayerCount() === 0 && this.state.phase === 'playing') {
+        this.endGame();
+        return;
+      }
 
       const timer = setTimeout(() => {
         this.disconnectTimers.delete(client.sessionId);
@@ -192,15 +211,19 @@ export class PatangRoom extends Room<GameRoomState> {
           this.currentInputs.delete(client.sessionId);
           this.cleanupPenchesFor(client.sessionId);
 
-          // Check if game should end
-          const activePlayers = Array.from(this.state.players.values()).filter(pl => pl.connected);
-          if (activePlayers.length === 0 && this.state.phase === 'playing') {
+          // End game if no real players remain
+          if (this.getRealPlayerCount() === 0 && this.state.phase === 'playing') {
             this.endGame();
           }
         }
       }, DISCONNECT_TIMEOUT * 1000);
 
       this.disconnectTimers.set(client.sessionId, timer);
+    }
+
+    // Cancel bot timer if we're in waiting and player leaves
+    if (this.state.phase === 'waiting') {
+      this.cancelBotSpawnTimer();
     }
 
     // Notify remaining players
@@ -215,19 +238,86 @@ export class PatangRoom extends Room<GameRoomState> {
   onDispose() {
     if (this.physicsInterval) clearInterval(this.physicsInterval);
     if (this.countdownInterval) clearInterval(this.countdownInterval);
+    this.cancelBotSpawnTimer();
     for (const timer of this.disconnectTimers.values()) clearTimeout(timer);
     this.disconnectTimers.clear();
+    this.botManager.destroy();
     console.log(`🏠 Room disposed: ${this.roomId}`);
   }
 
   // --- Game Flow ---
+
+  /** Count real (non-bot) connected players */
+  private getRealPlayerCount(): number {
+    let count = 0;
+    this.state.players.forEach(p => {
+      if (p.connected && !this.botManager.isBot(p.id)) count++;
+    });
+    return count;
+  }
 
   private checkAllReady() {
     // Only called when phase === 'waiting'
     const players = Array.from(this.state.players.values());
     if (players.length < MIN_PLAYERS_TO_START) return;
     if (!players.every(p => p.ready)) return;
+    this.cancelBotSpawnTimer();
     this.startCountdown();
+  }
+
+  /**
+   * Start a timer to spawn a bot if the player is waiting alone.
+   * Called when a real player readies up and is the only one.
+   */
+  private maybeScheduleBotSpawn() {
+    if (this.state.phase !== 'waiting') return;
+    this.cancelBotSpawnTimer();
+
+    const realReady = Array.from(this.state.players.values())
+      .filter(p => p.ready && !this.botManager.isBot(p.id));
+
+    // Only spawn bot if exactly 1 real player is waiting
+    if (realReady.length !== 1) return;
+
+    this.botSpawnTimer = setTimeout(() => {
+      this.botSpawnTimer = null;
+      if (this.state.phase !== 'waiting') return;
+
+      // Double-check: still only 1 real player?
+      const stillAlone = this.getRealPlayerCount() < MIN_PLAYERS_TO_START;
+      if (!stillAlone) return;
+
+      // Spawn bot
+      const result = this.botManager.spawn(
+        this.state.players as any,
+        this.currentInputs,
+        this.colorAssignment,
+      );
+      if (result) {
+        this.colorAssignment = result.newColorAssignment;
+
+        // Notify clients about the "player" joining
+        const botPlayer = this.state.players.get(result.botId);
+        if (botPlayer) {
+          this.broadcast(MessageType.PLAYER_JOINED, {
+            playerId: result.botId,
+            name: botPlayer.name,
+            colorIndex: botPlayer.colorIndex,
+            hotJoin: false,
+          });
+        }
+
+        // Now re-check if we can start
+        this.checkAllReady();
+      }
+    }, BOT_SPAWN_DELAY);
+  }
+
+  private cancelBotSpawnTimer() {
+    if (this.botSpawnTimer) {
+      clearTimeout(this.botSpawnTimer);
+      this.botSpawnTimer = null;
+    }
   }
 
   private startCountdown() {
@@ -265,6 +355,7 @@ export class PatangRoom extends Room<GameRoomState> {
     this.state.phase = 'finished';
     if (this.physicsInterval) { clearInterval(this.physicsInterval); this.physicsInterval = null; }
     if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = null; }
+    this.cancelBotSpawnTimer();
 
     // Clean all penches
     this.activePenches.clear();
@@ -272,9 +363,13 @@ export class PatangRoom extends Room<GameRoomState> {
 
     const rankings = Array.from(this.state.players.values())
       .sort((a, b) => b.score - a.score)
-      .map(p => ({ playerId: p.id, name: p.name, score: p.score, kiteCuts: 0 }));
+      .map(p => ({ playerId: p.id, name: p.name, score: p.score, kiteCuts: p.cuts }));
 
     this.broadcast(MessageType.GAME_OVER, { rankings });
+
+    // Remove bots from state (clients don't need them after game over)
+    this.botManager.removeAll(this.state.players as any, this.currentInputs);
+
     console.log(`🏆 Game over in room ${this.roomId}`);
 
     // Auto-disconnect all clients after a grace period
@@ -320,6 +415,31 @@ export class PatangRoom extends Room<GameRoomState> {
       if (s.active) {
         starsForPhysics.push({ id: s.id, position: { x: s.position.x, y: s.position.y }, size: s.size, active: true });
       }
+    }
+
+    // --- Update bot AI inputs (before physics so they participate this tick) ---
+    if (this.botManager.count > 0) {
+      // Gather pench involvement info for bot AI
+      const penchPlayers = new Set<string>();
+      const penchWinners = new Set<string>();
+      for (const tracker of this.activePenches.values()) {
+        penchPlayers.add(tracker.playerAId);
+        penchPlayers.add(tracker.playerBId);
+        if (tracker.winnerId) penchWinners.add(tracker.winnerId);
+      }
+
+      const botStars = starsForPhysics.map(s => ({
+        x: s.position.x, y: s.position.y, active: s.active,
+      }));
+
+      this.botManager.updateAll(
+        FIXED_DT,
+        this.state.players as any,
+        this.currentInputs,
+        botStars,
+        penchPlayers,
+        penchWinners,
+      );
     }
 
     // --- Step each player's kite ---
