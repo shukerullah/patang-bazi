@@ -32,7 +32,9 @@ export class PenchRenderer {
   private container: Container;
   private sparkGraphics: Graphics;
   private meterGraphics: Graphics;
-  private meterText: Text;
+
+  // Pool of meter text labels (reused each frame)
+  private meterTexts: Text[] = [];
 
   private penches = new Map<string, ActivePench>();
   private localPlayerId: string | null = null;
@@ -46,18 +48,25 @@ export class PenchRenderer {
 
     this.meterGraphics = new Graphics();
     this.container.addChild(this.meterGraphics);
+  }
 
-    const style = new TextStyle({
-      fontFamily: 'Baloo 2, cursive',
-      fontSize: 16,
-      fontWeight: 'bold',
-      fill: '#ff4444',
-      dropShadow: { color: '#000000', blur: 4, distance: 0, alpha: 0.8 },
-    });
-    this.meterText = new Text({ text: '⚔️ PENCH!', style });
-    this.meterText.anchor.set(0.5, 1);
-    this.meterText.visible = false;
-    this.container.addChild(this.meterText);
+  /** Get or create a text label from the pool */
+  private getMeterText(index: number): Text {
+    while (this.meterTexts.length <= index) {
+      const style = new TextStyle({
+        fontFamily: 'Baloo 2, cursive',
+        fontSize: 16,
+        fontWeight: 'bold',
+        fill: '#ff4444',
+        dropShadow: { color: '#000000', blur: 4, distance: 0, alpha: 0.8 },
+      });
+      const t = new Text({ text: '⚔️ PENCH!', style });
+      t.anchor.set(0.5, 1);
+      t.visible = false;
+      this.container.addChild(t);
+      this.meterTexts.push(t);
+    }
+    return this.meterTexts[index];
   }
 
   setLocalPlayer(id: string) {
@@ -129,12 +138,14 @@ export class PenchRenderer {
     this.sparkGraphics.clear();
     this.meterGraphics.clear();
 
-    let showMeter = false;
-    let meterProgress = 0;
-    let meterPos: Vec2 = { x: 0, y: 0 };
-    let localIsWinning = false;
-
-    let meterAge = 0;
+    // Collect all penches involving local player
+    interface LocalPenchInfo {
+      progress: number;
+      pos: Vec2;
+      age: number;
+      isWinning: boolean;
+    }
+    const localPenches: LocalPenchInfo[] = [];
 
     for (const [key, pench] of this.penches) {
       pench.age += dt;
@@ -203,37 +214,47 @@ export class PenchRenderer {
         this.sparkGraphics.stroke({ width: 1.5, color: 0xff6644, alpha: pulseAlpha });
       }
 
-      // Check if local player involved — show meter
+      // Collect for local player meter
       if (
         !isCutBurst &&
         this.localPlayerId &&
         (pench.playerAId === this.localPlayerId || pench.playerBId === this.localPlayerId)
       ) {
-        showMeter = true;
-        meterProgress = pench.displayProgress;
-        meterPos = pench.position;
-        meterAge = pench.age;
-        localIsWinning = pench.winnerId === this.localPlayerId;
+        localPenches.push({
+          progress: pench.displayProgress,
+          pos: pench.position,
+          age: pench.age,
+          isWinning: pench.winnerId === this.localPlayerId,
+        });
       }
     }
 
-    // Draw tension meter near crossing point (only for local player)
-    if (showMeter) {
-      this.drawTensionMeter(meterPos, meterProgress, localIsWinning, meterAge);
-    } else {
-      this.meterText.visible = false;
+    // Draw tension meters for ALL local-player penches (stacked vertically)
+    // Sort by progress descending so most urgent is drawn first (on top)
+    localPenches.sort((a, b) => b.progress - a.progress);
+
+    for (let i = 0; i < localPenches.length; i++) {
+      const lp = localPenches[i];
+      const yOffset = i * 32; // Stack meters 32px apart vertically
+      this.drawTensionMeter(i, lp.pos, lp.progress, lp.isWinning, lp.age, yOffset);
+    }
+
+    // Hide unused text labels
+    for (let i = localPenches.length; i < this.meterTexts.length; i++) {
+      this.meterTexts[i].visible = false;
     }
   }
 
-  private drawTensionMeter(pos: Vec2, progress: number, isWinning: boolean, penchAge: number) {
-    this.meterText.visible = true;
+  private drawTensionMeter(index: number, pos: Vec2, progress: number, isWinning: boolean, penchAge: number, yOffset: number) {
+    const text = this.getMeterText(index);
+    text.visible = true;
 
     const barW = 90;
     const barH = 10;
     const bx = pos.x - barW / 2;
-    const by = pos.y - 28;
+    const by = pos.y - 28 - yOffset;
 
-    this.meterText.position.set(pos.x, by - 4);
+    text.position.set(pos.x, by - 4);
 
     // Background bar
     this.meterGraphics.roundRect(bx - 1, by - 1, barW + 2, barH + 2, 5);
@@ -270,21 +291,21 @@ export class PenchRenderer {
     // Text label
     if (progress > 0.75) {
       if (isWinning) {
-        this.meterText.text = '🔥 CUTTING!';
-        this.meterText.style.fill = '#ff8833';
+        text.text = '🔥 CUTTING!';
+        text.style.fill = '#ff8833';
       } else {
-        this.meterText.text = '⚠️ DANGER!';
-        this.meterText.style.fill = '#ff2222';
+        text.text = '⚠️ DANGER!';
+        text.style.fill = '#ff2222';
       }
-      this.meterText.scale.set(1 + Math.sin(penchAge * 12) * 0.08);
+      text.scale.set(1 + Math.sin(penchAge * 12) * 0.08);
     } else if (progress > 0.4) {
-      this.meterText.text = isWinning ? '💪 PULLING!' : '⚔️ PENCH!';
-      this.meterText.style.fill = isWinning ? '#44cc44' : '#ff4444';
-      this.meterText.scale.set(1);
+      text.text = isWinning ? '💪 PULLING!' : '⚔️ PENCH!';
+      text.style.fill = isWinning ? '#44cc44' : '#ff4444';
+      text.scale.set(1);
     } else {
-      this.meterText.text = '⚔️ PENCH!';
-      this.meterText.style.fill = '#ff4444';
-      this.meterText.scale.set(1);
+      text.text = '⚔️ PENCH!';
+      text.style.fill = '#ff4444';
+      text.scale.set(1);
     }
   }
 

@@ -22,10 +22,10 @@ export class BirdRenderer {
     this.graphics = new Graphics();
     parent.addChild(this.graphics);
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       this.birds.push({
         x: Math.random() * WORLD_WIDTH,
-        y: WORLD_HEIGHT * 0.1 + Math.random() * WORLD_HEIGHT * 0.35,
+        y: WORLD_HEIGHT * 0.08 + Math.random() * WORLD_HEIGHT * 0.35,
         speed: 0.5 + Math.random() * 1,
         wingPhase: Math.random() * Math.PI * 2,
         dir: Math.random() > 0.5 ? 1 : -1,
@@ -45,11 +45,11 @@ export class BirdRenderer {
       if (b.x > WORLD_WIDTH + 50) { b.x = -50; b.dir = 1; }
       if (b.x < -50) { b.x = WORLD_WIDTH + 50; b.dir = -1; }
 
-      const wing = Math.sin(b.wingPhase) * 6;
+      const wing = Math.sin(b.wingPhase) * 10;
 
-      g.moveTo(b.x - 8, b.y + wing);
-      g.quadraticCurveTo(b.x, b.y - 3, b.x + 8, b.y + wing);
-      g.stroke({ width: 1.5, color: 0x281432, alpha: 0.5 });
+      g.moveTo(b.x - 12, b.y + wing);
+      g.quadraticCurveTo(b.x, b.y - 4, b.x + 12, b.y + wing);
+      g.stroke({ width: 2.5, color: 0x1a0a2e, alpha: 0.7 });
     }
   }
 

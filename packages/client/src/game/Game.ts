@@ -33,6 +33,7 @@ import {
   type PlayerInput,
   type KiteState,
   type WindState,
+  type GameOverMessage,
 } from '@patang/shared';
 
 function getServerUrl(): string {
@@ -176,10 +177,9 @@ export class Game {
   public hudEl: HTMLDivElement | null = null;
 
   // HUD refs
-  private hudHeight!: HTMLElement;
-  private hudScore!: HTMLElement;
   private hudWind!: HTMLElement;
   private hudPhase!: HTMLElement;
+  private hudPing!: HTMLElement;
   private hudTime!: HTMLElement;
   private hudPlayers!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
@@ -188,6 +188,7 @@ export class Game {
   private hudManjhaBar!: HTMLElement;
   private hudUpdateAccum = 0;
   private lastScoreboardHtml = '';
+  private pendingGameOver: GameOverMessage | null = null;
 
   constructor(app: Application, input: InputManager, network: NetworkManager) {
     this.app = app;
@@ -289,8 +290,6 @@ export class Game {
           display: inline-block; text-align: right;
         }
         .val-time { min-width: 30px; }
-        .val-alt  { min-width: 24px; }
-        .val-score { min-width: 24px; }
         .val-wind { min-width: 52px; }
         .mute-btn {
           background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1);
@@ -312,6 +311,13 @@ export class Game {
           font-size: 10px; color: rgba(255,255,255,0.35); font-weight: 500;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .hud-ping {
+          font-size: 9px; font-weight: 600; font-family: 'Poppins', monospace;
+          color: rgba(255,255,255,0.3);
+        }
+        .hud-ping.good { color: rgba(100,220,100,0.5); }
+        .hud-ping.ok { color: rgba(255,214,102,0.5); }
+        .hud-ping.bad { color: rgba(255,100,100,0.5); }
         .game-version {
           font-size: 9px; color: rgba(255,255,255,0.2); font-weight: 400;
           letter-spacing: 0.5px;
@@ -401,8 +407,6 @@ export class Game {
           .stat-pill { padding: 2px 8px; font-size: 10px; gap: 3px; }
           .stat-pill .val { font-size: 10px; }
           .val-time { min-width: 26px; }
-          .val-alt  { min-width: 20px; }
-          .val-score { min-width: 20px; }
           .val-wind { min-width: 44px; }
           .mute-btn { width: 26px; height: 26px; font-size: 12px; }
           .scoreboard { top: 40px; right: 8px; }
@@ -414,6 +418,7 @@ export class Game {
           #toast-container { top: 42px; left: 8px; }
           #hud-bottom-left { bottom: 8px; left: 10px; }
           .hud-phase { font-size: 9px; }
+          .hud-ping { font-size: 8px; }
           .game-version { font-size: 8px; }
           #manjha-bar { left: 6px; }
           .manjha-track { height: 90px; width: 5px; }
@@ -430,8 +435,6 @@ export class Game {
       <div class="game-title">🪁 PATANG BAZI</div>
       <div class="stats">
         <div class="stat-pill">⏱ <span class="val val-time" id="hTime">3:00</span></div>
-        <div class="stat-pill">📍 <span class="val val-alt" id="hAlt">0</span>m</div>
-        <div class="stat-pill">⭐ <span class="val val-score" id="hScore">0</span></div>
         <div class="stat-pill">💨 <span class="val val-wind" id="hWind">→</span></div>
         <button class="mute-btn" id="muteBtn">🔊</button>
       </div>
@@ -444,6 +447,7 @@ export class Game {
     bottomLeft.id = 'hud-bottom-left';
     bottomLeft.innerHTML = `
       <div class="hud-phase" id="hPhase"></div>
+      <div class="hud-ping" id="hPing"></div>
       <div class="game-version">v${GAME_VERSION}</div>
     `;
     document.body.appendChild(bottomLeft);
@@ -487,10 +491,9 @@ export class Game {
     `;
     document.body.appendChild(manjhaBar);
 
-    this.hudHeight = document.getElementById('hAlt')!;
-    this.hudScore = document.getElementById('hScore')!;
     this.hudWind = document.getElementById('hWind')!;
     this.hudPhase = document.getElementById('hPhase')!;
+    this.hudPing = document.getElementById('hPing')!;
     this.hudTime = document.getElementById('hTime')!;
     this.hudPlayers = document.getElementById('scoreboard')!;
     this.muteBtn = document.getElementById('muteBtn') as HTMLButtonElement;
@@ -662,6 +665,11 @@ export class Game {
       this.toasts.show(`${msg.name} left`, undefined, 2500);
     });
 
+    // Game over — capture rankings from server message (includes bots)
+    this.network.on('gameOver', (msg: GameOverMessage) => {
+      this.pendingGameOver = msg;
+    });
+
     this.network.on('disconnected', () => {
       this.cleanupGameState();
       this.lobbyUI.showError('Disconnected from server');
@@ -730,28 +738,50 @@ export class Game {
   }
 
   private onGameEnd() {
-    const state = this.network.state;
-    if (!state) return;
+    // Use rankings from GAME_OVER message (built BEFORE bots are removed)
+    const msg = this.pendingGameOver;
+    if (!msg || !msg.rankings) {
+      // Fallback: read from state (may miss bots if already removed)
+      const state = this.network.state;
+      if (!state) return;
+      const fallbackPlayers: Array<{
+        name: string; score: number; color: string;
+        isLocal: boolean; cuts: number;
+      }> = [];
+      for (const [id, p] of state.players.entries() as Iterable<[string, any]>) {
+        const palette = PLAYER_COLORS[p.colorIndex % PLAYER_COLORS.length];
+        fallbackPlayers.push({
+          name: p.name || 'Player',
+          score: p.score,
+          color: palette.primary,
+          isLocal: id === this.localPlayerId,
+          cuts: p.cuts ?? 0,
+        });
+      }
+      this.lobbyUI.showResults(fallbackPlayers);
+    } else {
+      // Primary path: use server-sent rankings (includes ALL players incl. bots)
+      const players = msg.rankings.map(r => {
+        const palette = PLAYER_COLORS[r.colorIndex % PLAYER_COLORS.length];
+        return {
+          name: r.name,
+          score: r.score,
+          color: palette.primary,
+          isLocal: r.playerId === this.localPlayerId,
+          cuts: r.kiteCuts ?? 0,
+        };
+      });
+      this.lobbyUI.showResults(players);
+    }
 
-    // Build results string
-    let results = '🏆 Game Over! ';
-    const sorted = Array.from(state.players.entries() as Iterable<[string, any]>)
-      .sort(([, a]: [string, any], [, b]: [string, any]) => b.score - a.score);
-    sorted.forEach(([id, p]: [string, any], i: number) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-      const you = id === this.localPlayerId ? ' (you)' : '';
-      results += `${medal} ${p.name}${you}: ${p.score}  `;
-    });
+    this.pendingGameOver = null;
 
-    // Show results overlay (inputs disabled)
-    this.lobbyUI.showResults(results);
-
-    // After 3 seconds: disconnect, cleanup, show fresh lobby
-    setTimeout(async () => {
+    // Wire up "Play Again" → disconnect, cleanup, show lobby
+    this.lobbyUI.onPlayAgain(async () => {
       await this.network.disconnect();
       this.cleanupGameState();
       this.lobbyUI.reset();
-    }, 3000);
+    });
   }
 
   /** Clean up all game state between sessions */
@@ -767,6 +797,7 @@ export class Game {
 
     // Reset game state
     this.localPlayerId = null;
+    this.pendingGameOver = null;
     this.gameTime = 0;
     this.inputSeq = 0;
     this.inputSendAccum = 0;
@@ -938,6 +969,8 @@ export class Game {
       const isLocal = sessionId === this.localPlayerId;
 
       if (isLocal && player.connected) {
+        // Measure ping from input ack (client-side only, zero server cost)
+        this.network.updatePing(player.lastProcessedInput);
         const pending = this.network.getPendingInputs(player.lastProcessedInput);
         let predicted = { ...kite };
         for (const pi of pending) {
@@ -973,12 +1006,6 @@ export class Game {
 
     // Cheap textContent updates — safe every frame
     if (localPlayer) {
-      const heightM = Math.max(0, Math.round(
-        (localPlayer.anchorPosition.y - localPlayer.kite.position.y) / (WORLD_HEIGHT * 0.008)
-      ));
-      this.hudHeight.textContent = String(heightM);
-      this.hudScore.textContent = String(localPlayer.score);
-
       // Manjha (string) length bar
       const dx = localPlayer.kite.position.x - localPlayer.anchorPosition.x;
       const dy = localPlayer.kite.position.y - localPlayer.anchorPosition.y;
@@ -1014,6 +1041,13 @@ export class Game {
 
     const arrow = wind.direction > 0 ? '→' : '←';
     this.hudWind.textContent = wind.speed < 0.5 ? 'Calm' : wind.speed < 1 ? `${arrow} Light` : `${arrow} Strong`;
+
+    // Ping display (client-side measurement)
+    const ping = this.network.ping;
+    if (ping > 0) {
+      this.hudPing.textContent = `${ping}ms`;
+      this.hudPing.className = ping < 80 ? 'hud-ping good' : ping < 150 ? 'hud-ping ok' : 'hud-ping bad';
+    }
 
     this.hudPhase.textContent = state.phase === 'playing'
       ? `Room: ${this.network.roomId?.slice(0, 6)} · ${state.players.size} players`

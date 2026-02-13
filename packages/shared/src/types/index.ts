@@ -145,6 +145,7 @@ export interface GameOverMessage {
     name: string;
     score: number;
     kiteCuts: number;
+    colorIndex: number;
   }>;
 }
 
