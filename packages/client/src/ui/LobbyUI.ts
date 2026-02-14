@@ -7,6 +7,8 @@
 
 export type LobbyCallback = (name: string) => void;
 
+import { getPrefs, savePrefs, isTouchDevice } from '../utils/prefs.js';
+
 export class LobbyUI {
   private overlay: HTMLDivElement;
   private resultsOverlay!: HTMLDivElement;
@@ -86,13 +88,8 @@ export class LobbyUI {
           margin-top: 24px; text-align: center; color: rgba(255,255,255,0.3);
           font-size: 12px; display: flex; flex-direction: column; gap: 8px;
           padding: 0 16px; width: 100%; box-sizing: border-box;
+          line-height: 1.8;
         }
-        .lobby-instructions kbd {
-          background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.2);
-          border-radius: 4px; padding: 2px 7px; color: #ffd666; font-weight: 600;
-          font-family: inherit; font-size: 11px;
-        }
-        .lobby-inst-mobile { display: none; }
         /* Loading spinner */
         .lobby-loading {
           display: none; flex-direction: column; align-items: center; gap: 16px;
@@ -119,9 +116,7 @@ export class LobbyUI {
           .lobby-btn { padding: 10px 32px; font-size: 18px; }
           .lobby-status { font-size: 12px; max-width: 300px; }
           .lobby-countdown { font-size: 64px; }
-          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; }
-          .lobby-inst-desktop { display: none; }
-          .lobby-inst-mobile { display: block; }
+          .lobby-instructions { font-size: 11px; margin-top: 16px; }
         }
         @media (max-width: 360px) {
           .lobby-title { font-size: 26px; }
@@ -231,16 +226,9 @@ export class LobbyUI {
       <div class="lobby-players" id="lobby-players"></div>
       <div class="lobby-countdown" id="lobby-countdown">3</div>
       <div class="lobby-instructions" id="lobby-instructions">
-        <div class="lobby-inst-desktop">
-          <div>Click & hold to pull string & fly up</div>
-          <div>Left side to steer left · Right side to steer right</div>
-          <div>Catch ⭐ stars · Cut opponents' strings!</div>
-        </div>
-        <div class="lobby-inst-mobile">
-          <div>Touch & hold to pull string & fly up</div>
-          <div>Left side to steer left · Right side to steer right</div>
-          <div>Catch ⭐ stars · Cut opponents' strings!</div>
-        </div>
+        <div>${isTouchDevice() ? 'Tap & hold' : 'Hold Mouse or Space'} to pull string & fly up</div>
+        <div>Left side to steer left · Right side to steer right</div>
+        <div>Catch ⭐ stars · Cross strings to cut opponents!</div>
       </div>
     `;
     document.body.appendChild(this.overlay);
@@ -259,7 +247,7 @@ export class LobbyUI {
     this.instructionsEl = document.getElementById('lobby-instructions') as HTMLDivElement;
 
     // Load saved name or generate random default
-    const savedName = this.loadName();
+    const savedName = getPrefs().name;
     if (savedName) {
       this.nameInput.value = savedName;
     } else {
@@ -279,19 +267,10 @@ export class LobbyUI {
 
   private doConnect() {
     const name = this.nameInput.value.trim() || 'Player';
-    this.saveName(name);
+    savePrefs({ name });
     this.connectBtn.disabled = true;
     this.nameInput.disabled = true;
     this.onConnect(name);
-  }
-
-  /** Persist player name across sessions */
-  private saveName(name: string) {
-    try { localStorage.setItem('patang_name', name); } catch { /* private browsing */ }
-  }
-
-  private loadName(): string | null {
-    try { return localStorage.getItem('patang_name'); } catch { return null; }
   }
 
   setStatus(text: string, isError = false) {
@@ -364,7 +343,7 @@ export class LobbyUI {
     const subText = localIdx === 0
       ? 'Unmatched kite fighter!'
       : localIdx === 1 ? 'So close! Almost had it.'
-      : 'Better luck next time!';
+        : 'Better luck next time!';
 
     const rowsHtml = sorted.map((p, i) => {
       const rank = i < 3 ? medals[i] : `${i + 1}`;

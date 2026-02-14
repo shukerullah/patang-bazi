@@ -29,12 +29,14 @@ import {
   STAR_POINTS,
   SCORE_KITE_CUT,
   GAME_VERSION,
+  INSTRUCTION_DISPLAY_DELAY,
   stepKite,
   type PlayerInput,
   type KiteState,
   type WindState,
   type GameOverMessage,
 } from '@patang/shared';
+import { getPrefs, savePrefs, isTouchDevice } from '../utils/prefs.js';
 
 function getServerUrl(): string {
   // Production: set VITE_SERVER_URL env var at build time
@@ -189,6 +191,11 @@ export class Game {
   private hudUpdateAccum = 0;
   private lastScoreboardHtml = '';
   private pendingGameOver: GameOverMessage | null = null;
+
+  // Instructions
+  private instructionsEl!: HTMLElement;
+  private infoBtnEl!: HTMLButtonElement;
+  private instructionsTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(app: Application, input: InputManager, network: NetworkManager) {
     this.app = app;
@@ -353,24 +360,32 @@ export class Game {
         .sb-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px; }
         .sb-score { color: #ffd666; font-weight: 700; }
 
-        /* Controls bar */
-        #controls-bar {
-          position: fixed; bottom: 0; left: 0; right: 0;
-          padding: 10px 16px; display: flex; justify-content: center;
-          pointer-events: none; z-index: 10;
-        }
-        .controls-inner {
-          background: rgba(0,0,0,0.25); backdrop-filter: blur(12px);
+        /* Instructions toast (fades in/out) */
+        #game-instructions {
+          position: fixed; bottom: 48px; left: 50%; transform: translateX(-50%);
+          z-index: 10; pointer-events: none;
+          background: rgba(0,0,0,0.35); backdrop-filter: blur(12px);
           border: 1px solid rgba(255,255,255,0.06); border-radius: 14px;
-          padding: 6px 16px; display: flex; gap: 14px; font-size: 11px;
-          color: rgba(255,255,255,0.45); font-weight: 500;
+          padding: 8px 20px;
+          font-size: 11px; color: rgba(255,255,255,0.5); font-weight: 500;
           font-family: 'Poppins', sans-serif;
+          text-align: center; line-height: 1.7;
+          opacity: 0; transition: opacity 0.6s ease;
         }
-        .controls-inner kbd {
-          background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.25);
-          border-radius: 4px; padding: 1px 5px; color: #ffd666; font-weight: 700; font-size: 10px;
+        #game-instructions.visible { opacity: 1; }
+
+        /* Info button — bottom right */
+        #info-btn {
+          position: fixed; bottom: 12px; right: 16px;
+          z-index: 10; pointer-events: auto;
+          background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 50%; width: 28px; height: 28px;
+          font-size: 13px; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          color: rgba(255,255,255,0.4); transition: background 0.2s, color 0.2s;
+          font-family: 'Poppins', sans-serif; font-weight: 700;
         }
-        .controls-mobile { display: none; }
+        #info-btn:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
 
         /* === MANJHA (string) length bar === */
         #manjha-bar {
@@ -413,8 +428,11 @@ export class Game {
           .sb-row { padding: 2px 8px; font-size: 10px; }
           .sb-name { max-width: 60px; }
           #score-popup { font-size: 32px; }
-          .controls-desktop { display: none; }
-          .controls-mobile { display: flex; }
+          #game-instructions {
+            font-size: 10px; bottom: 40px; padding: 6px 14px;
+            max-width: 300px; white-space: normal;
+          }
+          #info-btn { bottom: 8px; right: 10px; width: 24px; height: 24px; font-size: 11px; }
           #toast-container { top: 42px; left: 8px; }
           #hud-bottom-left { bottom: 8px; left: 10px; }
           .hud-phase { font-size: 9px; }
@@ -459,22 +477,29 @@ export class Game {
     popup.id = 'score-popup';
     document.body.appendChild(popup);
 
-    // Controls — desktop + mobile variants
-    const controls = document.createElement('div');
-    controls.id = 'controls-bar';
-    controls.innerHTML = `
-      <div class="controls-inner controls-desktop">
-        <span>Click & hold to pull up</span>
-        <span>👈 Left side · Right side 👉 to steer</span>
-        <span>Cross strings to cut opponents!</span>
-      </div>
-      <div class="controls-inner controls-mobile">
-        <span>Touch & hold to pull up</span>
-        <span>👈 Left · Right 👉 to steer</span>
-        <span>Cross strings to cut!</span>
-      </div>
-    `;
-    document.body.appendChild(controls);
+    // Instructions toast (auto-shows on first play, toggle via info button)
+    const verb = isTouchDevice()
+      ? 'Tap & hold'
+      : 'Hold Mouse or Space';
+    const instructions = document.createElement('div');
+    instructions.id = 'game-instructions';
+    instructions.innerHTML = `${verb} to fly up · Left & Right to steer · Cross strings to cut!`;
+    document.body.appendChild(instructions);
+
+    // Info button — always visible during gameplay
+    const infoBtn = document.createElement('button');
+    infoBtn.id = 'info-btn';
+    infoBtn.textContent = 'ℹ';
+    infoBtn.title = 'Show controls';
+    document.body.appendChild(infoBtn);
+
+    this.instructionsEl = instructions;
+    this.infoBtnEl = infoBtn;
+    this.infoBtnEl.style.display = 'none'; // Hidden until game starts
+
+    infoBtn.addEventListener('click', () => {
+      this.showInstructions();
+    });
 
     // Manjha (string length) bar — center left
     const manjhaBar = document.createElement('div');
@@ -732,6 +757,31 @@ export class Game {
     this.cameraInitialized = false;
     this.sound.playCountdownBeep(true);
     this.hudManjhaBar.style.display = '';
+
+    // Show info button (hidden during lobby/results)
+    this.infoBtnEl.style.display = '';
+
+    // Show instructions on first ever game; otherwise just show info button
+    if (!getPrefs().tutorialSeen) {
+      savePrefs({ tutorialSeen: true });
+      this.showInstructions();
+    }
+  }
+
+  /** Show the instructions toast, auto-hide after INSTRUCTION_DISPLAY_DELAY */
+  private showInstructions() {
+    // Clear any existing timer
+    if (this.instructionsTimer) {
+      clearTimeout(this.instructionsTimer);
+      this.instructionsTimer = null;
+    }
+
+    this.instructionsEl.classList.add('visible');
+
+    this.instructionsTimer = setTimeout(() => {
+      this.instructionsEl.classList.remove('visible');
+      this.instructionsTimer = null;
+    }, INSTRUCTION_DISPLAY_DELAY);
   }
 
   private onGameEnd() {
@@ -802,6 +852,11 @@ export class Game {
     this.lastSentSteer = 0;
     this.cameraInitialized = false;
     this.hudManjhaBar.style.display = 'none';
+
+    // Hide instructions toast and info button
+    if (this.instructionsTimer) { clearTimeout(this.instructionsTimer); this.instructionsTimer = null; }
+    this.instructionsEl.classList.remove('visible');
+    this.infoBtnEl.style.display = 'none';
   }
 
   // ========================

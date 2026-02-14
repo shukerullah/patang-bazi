@@ -75,6 +75,7 @@ export const ROUND_DURATION = 180;               // Seconds per round
 export const MIN_PLAYERS_TO_START = 2;           // Minimum players to begin countdown
 export const COUNTDOWN_SECONDS = 3;              // Countdown before round starts
 export const KITE_RESPAWN_DELAY = 3000;          // ms before cut kite respawns
+export const INSTRUCTION_DISPLAY_DELAY = 5000;   // How long to show in-game tutorial
 
 // --- Bot ---
 export const BOT_SPAWN_DELAY = 15000;            // ms waiting alone before bot joins
