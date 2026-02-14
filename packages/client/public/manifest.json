@@ -2,10 +2,10 @@
     "name": "Patang Bazi",
     "short_name": "PatBazi",
     "start_url": "./",
-    "display": "standalone",
+    "display": "fullscreen",
     "background_color": "#000000",
     "theme_color": "#000000",
-    "orientation": "landscape",
+    "orientation": "portrait",
     "description": "Multiplayer Kite Fighting Game",
     "icons": [
         {
