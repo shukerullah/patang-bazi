@@ -7,6 +7,8 @@
 
 export type LobbyCallback = (name: string) => void;
 
+import { getPrefs, savePrefs, isTouchDevice } from '../utils/prefs.js';
+
 export class LobbyUI {
   private overlay: HTMLDivElement;
   private resultsOverlay!: HTMLDivElement;
@@ -86,13 +88,8 @@ export class LobbyUI {
           margin-top: 24px; text-align: center; color: rgba(255,255,255,0.3);
           font-size: 12px; display: flex; flex-direction: column; gap: 8px;
           padding: 0 16px; width: 100%; box-sizing: border-box;
+          line-height: 1.8;
         }
-        .lobby-instructions kbd {
-          background: rgba(255,214,102,0.12); border: 1px solid rgba(255,214,102,0.2);
-          border-radius: 4px; padding: 2px 7px; color: #ffd666; font-weight: 600;
-          font-family: inherit; font-size: 11px;
-        }
-        .lobby-inst-mobile { display: none; }
         /* Loading spinner */
         .lobby-loading {
           display: none; flex-direction: column; align-items: center; gap: 16px;
@@ -119,9 +116,7 @@ export class LobbyUI {
           .lobby-btn { padding: 10px 32px; font-size: 18px; }
           .lobby-status { font-size: 12px; max-width: 300px; }
           .lobby-countdown { font-size: 64px; }
-          .lobby-instructions { font-size: 11px; line-height: 1.8; margin-top: 16px; }
-          .lobby-inst-desktop { display: none; }
-          .lobby-inst-mobile { display: block; }
+          .lobby-instructions { font-size: 11px; margin-top: 16px; }
         }
         @media (max-width: 360px) {
           .lobby-title { font-size: 26px; }
@@ -231,15 +226,9 @@ export class LobbyUI {
       <div class="lobby-players" id="lobby-players"></div>
       <div class="lobby-countdown" id="lobby-countdown">3</div>
       <div class="lobby-instructions" id="lobby-instructions">
-        <div class="lobby-inst-desktop">
-          <div><kbd>SPACE</kbd> or <kbd>CLICK</kbd> to pull string & fly up</div>
-          <div><kbd>← →</kbd> or <kbd>A D</kbd> to steer · Catch ⭐ stars · Cut opponents' strings!</div>
-        </div>
-        <div class="lobby-inst-mobile">
-          <div>Touch anywhere to pull string & fly up</div>
-          <div>Left side to steer left · Right side to steer right</div>
-          <div>Catch ⭐ stars · Cut opponents' strings!</div>
-        </div>
+        <div>${isTouchDevice() ? 'Tap & hold' : 'Hold Mouse or Space'} to pull string & fly up</div>
+        <div>Left side to steer left · Right side to steer right</div>
+        <div>Catch ⭐ stars · Cross strings to cut opponents!</div>
       </div>
     `;
     document.body.appendChild(this.overlay);
@@ -257,10 +246,15 @@ export class LobbyUI {
     this.loadingEl = document.getElementById('lobby-loading') as HTMLDivElement;
     this.instructionsEl = document.getElementById('lobby-instructions') as HTMLDivElement;
 
-    // Random default name
-    const names = ['Ustaad', 'Patangbaaz', 'Sultan', 'Dorbaaz', 'Shikari', 'Khiladi', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
-    this.nameInput.value = names[Math.floor(Math.random() * names.length)] +
-      Math.floor(Math.random() * 99);
+    // Load saved name or generate random default
+    const savedName = getPrefs().name;
+    if (savedName) {
+      this.nameInput.value = savedName;
+    } else {
+      const names = ['Ustaad', 'Patangbaaz', 'Sultan', 'Dorbaaz', 'Shikari', 'Khiladi', 'Pilot', 'Hawk', 'Eagle', 'Falcon'];
+      this.nameInput.value = names[Math.floor(Math.random() * names.length)] +
+        Math.floor(Math.random() * 99);
+    }
 
     this.connectBtn.addEventListener('click', () => this.doConnect());
     this.nameInput.addEventListener('keydown', (e) => {
@@ -273,6 +267,7 @@ export class LobbyUI {
 
   private doConnect() {
     const name = this.nameInput.value.trim() || 'Player';
+    savePrefs({ name });
     this.connectBtn.disabled = true;
     this.nameInput.disabled = true;
     this.onConnect(name);
@@ -348,7 +343,7 @@ export class LobbyUI {
     const subText = localIdx === 0
       ? 'Unmatched kite fighter!'
       : localIdx === 1 ? 'So close! Almost had it.'
-      : 'Better luck next time!';
+        : 'Better luck next time!';
 
     const rowsHtml = sorted.map((p, i) => {
       const rank = i < 3 ? medals[i] : `${i + 1}`;
