@@ -2,6 +2,8 @@
 
 Multiplayer kite fighting game inspired by traditional South Asian kite battles. Fly your kite, catch stars, cross strings with opponents, and cut them down.
 
+### [▶ Play Now on itch.io](https://shukerullah.itch.io/patang-bazi)
+
 ## How to Play
 
 - **Pull string** — `SPACE` / `CLICK` / Touch to fly your kite higher
@@ -44,6 +46,17 @@ pnpm dev:server   # → ws://localhost:2567
 pnpm dev:client   # → http://localhost:3000
 ```
 
+## Building
+
+```bash
+# Standard build (for Netlify/Vercel)
+pnpm build
+
+# Portal build — single HTML file for itch.io/CrazyGames
+pnpm --filter @patang/client build:portal
+# Output: packages/client/dist-portal/index.html
+```
+
 ## Deployment
 
 **Client** is deployed on [Netlify](https://netlify.com), **Server** on [Render](https://render.com). Both auto-deploy from the `main` branch.
@@ -70,8 +83,9 @@ Config is in `netlify.toml`. Set one environment variable:
 - Pench system — progressive string-crossing battles with sparks and tension meter
 - Client-side prediction with server reconciliation
 - Procedural audio (wind, string tension, crowd reactions)
+- Bot opponents when no players are available
 - Hot-join — drop into games already in progress
-- Responsive design — desktop and mobile touch controls
+- Responsive design — unified click/touch controls across desktop and mobile
 - Star collectibles with appear/disappear lifecycle
 - Manjha (string length) progress bar
 
