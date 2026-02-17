@@ -1,5 +1,7 @@
 # 🪁 Patang Bazi
 
+![Patang Bazi Cover](media/covers/cover-landscape-1536x1024.png)
+
 Multiplayer kite fighting game inspired by traditional South Asian kite battles. Fly your kite, catch stars, cross strings with opponents, and cut them down.
 
 ### [▶ Play Now on itch.io](https://shukerullah.itch.io/patang-bazi)
