@@ -30,19 +30,23 @@ export class LobbyUI {
         #lobby-overlay {
           position: fixed; inset: 0; z-index: 30;
           display: flex; flex-direction: column;
-          align-items: center; justify-content: center;
+          align-items: center;
           background: rgba(10,5,25,0.88);
           backdrop-filter: blur(20px);
           font-family: 'Poppins', sans-serif;
           transition: opacity 0.6s ease;
+          overflow-y: auto; overflow-x: hidden;
+          padding: 24px 16px;
         }
+        /* Spacer pushes content to center when room, collapses when not */
+        .lobby-spacer { flex: 1 1 0; min-height: 0; }
         #lobby-overlay.hidden { opacity: 0; pointer-events: none; }
-        .lobby-kite { font-size: 72px; margin-bottom: 8px; animation: kbob 3s ease-in-out infinite; }
+        .lobby-kite { font-size: 72px; margin-bottom: 8px; animation: kbob 3s ease-in-out infinite; flex-shrink: 0; }
         @keyframes kbob { 0%,100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-15px) rotate(5deg); } }
         .lobby-title { font-family: 'Baloo 2', cursive; font-size: 48px; font-weight: 800; color: #fff;
-          text-shadow: 0 4px 30px rgba(255,150,50,0.4); margin-bottom: 6px; }
-        .lobby-sub { font-size: 15px; color: rgba(255,255,255,0.45); margin-bottom: 28px; font-weight: 300; }
-        .lobby-form { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+          text-shadow: 0 4px 30px rgba(255,150,50,0.4); margin-bottom: 6px; flex-shrink: 0; }
+        .lobby-sub { font-size: 15px; color: rgba(255,255,255,0.45); margin-bottom: 28px; font-weight: 300; flex-shrink: 0; }
+        .lobby-form { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-shrink: 0; }
         .lobby-input {
           background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
           border-radius: 12px; padding: 12px 20px; font-size: 16px; color: #fff;
@@ -63,13 +67,13 @@ export class LobbyUI {
         .lobby-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
         .lobby-status {
           font-size: 14px; color: rgba(255,255,255,0.5); margin-top: 12px;
-          min-height: 20px; transition: color 0.3s; text-align: center;
-          max-width: 500px; line-height: 1.5;
+          min-height: 0; transition: color 0.3s; text-align: center;
+          max-width: 500px; line-height: 1.5; flex-shrink: 0;
         }
         .lobby-status.error { color: #ff6b6b; }
         .lobby-players {
-          margin-top: 20px; display: flex; flex-direction: column;
-          align-items: center; gap: 8px; min-height: 40px;
+          margin-top: 12px; display: flex; flex-direction: column;
+          align-items: center; gap: 8px; flex-shrink: 0;
         }
         .lobby-player {
           background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
@@ -80,7 +84,7 @@ export class LobbyUI {
         .lobby-countdown {
           font-family: 'Baloo 2', cursive; font-size: 96px; font-weight: 800;
           color: #ffd666; text-shadow: 0 4px 40px rgba(255,180,50,0.5);
-          display: none;
+          display: none; flex-shrink: 0;
         }
         .lobby-countdown.active { display: block; animation: countPulse 1s ease-in-out infinite; }
         @keyframes countPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
@@ -88,12 +92,12 @@ export class LobbyUI {
           margin-top: 24px; text-align: center; color: rgba(255,255,255,0.3);
           font-size: 12px; display: flex; flex-direction: column; gap: 8px;
           padding: 0 16px; width: 100%; box-sizing: border-box;
-          line-height: 1.8;
+          line-height: 1.8; flex-shrink: 0;
         }
         /* Loading spinner */
         .lobby-loading {
           display: none; flex-direction: column; align-items: center; gap: 16px;
-          margin-top: 12px;
+          margin-top: 12px; flex-shrink: 0;
         }
         .lobby-loading.active { display: flex; }
         .lobby-spinner {
@@ -106,7 +110,8 @@ export class LobbyUI {
         .lobby-loading-text {
           font-size: 13px; color: rgba(255,255,255,0.45); text-align: center;
         }
-        /* Mobile responsive */
+
+        /* Narrow width */
         @media (max-width: 600px) {
           .lobby-kite { font-size: 48px; margin-bottom: 4px; }
           .lobby-title { font-size: 32px; }
@@ -123,16 +128,42 @@ export class LobbyUI {
           .lobby-input { width: 180px; }
         }
 
+        /* Short height — compact everything */
+        @media (max-height: 580px) {
+          #lobby-overlay { padding: 12px 16px; }
+          .lobby-kite { font-size: 36px; margin-bottom: 2px; }
+          .lobby-title { font-size: 28px; margin-bottom: 2px; }
+          .lobby-sub { font-size: 12px; margin-bottom: 10px; }
+          .lobby-form { margin-bottom: 8px; gap: 8px; }
+          .lobby-input { padding: 8px 14px; font-size: 14px; }
+          .lobby-btn { padding: 8px 28px; font-size: 16px; }
+          .lobby-status { margin-top: 6px; font-size: 11px; }
+          .lobby-players { margin-top: 6px; gap: 4px; }
+          .lobby-player { padding: 4px 12px; font-size: 11px; }
+          .lobby-countdown { font-size: 56px; }
+          .lobby-instructions { margin-top: 10px; font-size: 10px; gap: 4px; line-height: 1.5; }
+          .lobby-loading { gap: 8px; margin-top: 6px; }
+          .lobby-spinner { width: 24px; height: 24px; }
+        }
+        @media (max-height: 400px) {
+          .lobby-kite { display: none; }
+          .lobby-title { font-size: 22px; }
+          .lobby-sub { margin-bottom: 6px; }
+          .lobby-instructions { display: none; }
+        }
+
         /* === GAME OVER RESULTS === */
         #results-overlay {
           position: fixed; inset: 0; z-index: 35;
           display: flex; flex-direction: column;
-          align-items: center; justify-content: center;
+          align-items: center;
           background: rgba(10,5,25,0.92);
           backdrop-filter: blur(24px);
           font-family: 'Poppins', sans-serif;
           opacity: 0; pointer-events: none;
           transition: opacity 0.6s ease;
+          overflow-y: auto; overflow-x: hidden;
+          padding: 24px 16px;
         }
         #results-overlay.visible { opacity: 1; pointer-events: auto; }
 
@@ -210,7 +241,26 @@ export class LobbyUI {
           .result-score { font-size: 20px; }
           .results-play-again button { padding: 10px 32px; font-size: 18px; }
         }
+
+        @media (max-height: 580px) {
+          #results-overlay { padding: 12px 16px; }
+          .results-header { font-size: 28px; margin-bottom: 2px; }
+          .results-sub { font-size: 11px; margin-bottom: 12px; }
+          .result-row { padding: 8px 12px; gap: 8px; border-radius: 10px; }
+          .result-rank { font-size: 20px; width: 28px; }
+          .result-name { font-size: 12px; }
+          .result-score { font-size: 18px; }
+          .results-play-again { margin-top: 16px; }
+          .results-play-again button { padding: 8px 28px; font-size: 16px; }
+        }
+        @media (max-height: 400px) {
+          .results-header { font-size: 22px; }
+          .results-sub { margin-bottom: 8px; }
+          .results-list { gap: 6px; }
+          .result-row { padding: 6px 10px; }
+        }
       </style>
+      <div class="lobby-spacer"></div>
       <div class="lobby-kite">🪁</div>
       <div class="lobby-title">PATANG BAZI</div>
       <div class="lobby-sub">Multiplayer Kite Fighting</div>
@@ -230,6 +280,7 @@ export class LobbyUI {
         <div>Left side to steer left · Right side to steer right</div>
         <div>Catch ⭐ stars · Cross strings to cut opponents!</div>
       </div>
+      <div class="lobby-spacer"></div>
     `;
     document.body.appendChild(this.overlay);
 
@@ -370,12 +421,14 @@ export class LobbyUI {
     }).join('');
 
     this.resultsOverlay.innerHTML = `
+      <div class="lobby-spacer"></div>
       <div class="results-header">${headerText}</div>
       <div class="results-sub">${subText}</div>
       <div class="results-list">${rowsHtml}</div>
       <div class="results-play-again" id="results-play-again">
         <button id="results-play-btn">FLY AGAIN! 🪁</button>
       </div>
+      <div class="lobby-spacer"></div>
     `;
 
     this.resultsOverlay.classList.add('visible');
